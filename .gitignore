@@ -1,14 +1,274 @@
 
-# Added by ggshield
-.cache_ggshield
-.pycache
 .langgraph_api
-__pycache__
 
-# Added by ggshield
-.cache_ggshield
 
-# Added by ggshield
-.cache_ggshield
+##########################################################
+# ENVIRONMENT VARIABLES / SECRETS
+##########################################################
 
 .env
+.env.*
+*.env
+*.local
+*.secret
+*.secrets
+*.credentials
+*.key
+*.pem
+*.p12
+*.pfx
+
+# environment backups
+.env.bak
+.env.backup
+.envrc
+
+# API key files
+*api_key*
+*apikey*
+*token*
+*secret*
+
+credentials.json
+service_account.json
+gcloud-service-key.json
+
+##########################################################
+# PYTHON BYTECODE
+##########################################################
+
+__pycache__/
+.pycache
+*.py[cod]
+*$py.class
+*.so
+
+##########################################################
+# PYTHON BUILD / PACKAGING
+##########################################################
+
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+.installed.cfg
+
+##########################################################
+# VIRTUAL ENVIRONMENTS
+##########################################################
+
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+##########################################################
+# PACKAGE MANAGERS
+##########################################################
+
+pip-log.txt
+pip-delete-this-directory.txt
+poetry.lock
+pdm.lock
+
+##########################################################
+# TESTING / COVERAGE
+##########################################################
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.cache/
+
+##########################################################
+# TYPE CHECKERS
+##########################################################
+
+.mypy_cache/
+.pyre/
+.pytype/
+
+##########################################################
+# JUPYTER
+##########################################################
+
+.ipynb_checkpoints
+
+##########################################################
+# LOGS
+##########################################################
+
+*.log
+logs/
+log/
+*.out
+*.err
+
+##########################################################
+# TEMP FILES
+##########################################################
+
+tmp/
+temp/
+*.tmp
+
+##########################################################
+# DATABASES / LOCAL STATE
+##########################################################
+
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+##########################################################
+# VECTOR DATABASES
+##########################################################
+
+# Chroma
+chroma/
+chroma_db/
+
+# FAISS
+faiss_index/
+*.faiss
+
+# Milvus local
+milvus/
+
+# Weaviate
+weaviate_data/
+
+##########################################################
+# MODEL FILES
+##########################################################
+
+*.gguf
+*.ggml
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+models/
+checkpoints/
+
+##########################################################
+# DATASETS
+##########################################################
+
+data/
+datasets/
+*.parquet
+*.arrow
+*.feather
+*.csv.large
+
+##########################################################
+# LLM OUTPUTS / GENERATIONS
+##########################################################
+
+outputs/
+responses/
+generations/
+runs/
+
+##########################################################
+# LANGCHAIN / LANGGRAPH
+##########################################################
+.langgraph_api/
+.langchain/
+.langchain_cache/
+langchain_cache/
+
+##########################################################
+# LANGSMITH
+##########################################################
+
+.langsmith/
+langsmith_logs/
+traces/
+
+##########################################################
+# REDIS / MESSAGE QUEUES
+##########################################################
+
+redis_data/
+redis_dump.rdb
+
+##########################################################
+# DOCKER
+##########################################################
+
+docker-compose.override.yml
+.env.docker
+docker-data/
+docker-volumes/
+
+##########################################################
+# KUBERNETES
+##########################################################
+
+*.kubeconfig
+kubeconfig
+secrets.yaml
+
+##########################################################
+# OBSERVABILITY / TRACING
+##########################################################
+
+otel_data/
+traces/
+metrics/
+
+##########################################################
+# IDE / EDITORS
+##########################################################
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+##########################################################
+# MAC / WINDOWS
+##########################################################
+
+.DS_Store
+Thumbs.db
+
+##########################################################
+# NODE (if frontend or dashboard exists)
+##########################################################
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+##########################################################
+# SECURITY / SECRET SCANNING OUTPUT
+##########################################################
+
+.cache_ggshield
+.gitguardian/
+gitleaks-report.json
+secret-report.json
