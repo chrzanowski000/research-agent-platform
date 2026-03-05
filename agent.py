@@ -393,7 +393,7 @@ def _run_tavily_search(query: str) -> dict:
     return client.search(
         query=query,
         topic="general",
-        max_results=3,
+        max_results=1,
         search_depth="advanced",
     )
 
@@ -509,7 +509,7 @@ def reflect_on_answer(state: AgentState) -> dict:
     review_prompt = (
         f"Task: {task}\n\n"
         f"Draft:\n{draft}\n\n"
-        "Review now."
+        "Review whether Draft have enough information to answer Task. Check if form expected in Task matches Draft"
     )
 
     logger.info("Reflecting on draft (iteration=%d)", iteration)
@@ -565,10 +565,6 @@ def route_after_reflect(
 
 def build_graph() -> StateGraph:
     """Build and compile the LangGraph self-reflection agent graph.
-
-    Graph flow:
-        search_decision → [web_search →] generate → reflect
-              ↑___________________________________|  (until done or blocked)
 
     Returns:
         Compiled LangGraph application.
