@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "self_reflection_agent": "./agent.py:app"
+  },
+  "env": ".env"
+}
