@@ -55,7 +55,7 @@ This repo now includes `langgraph.json` pointing to `agent.py:app`.
 
 1. Install dependencies:
 ```bash
-pip install -r requirements.rtxt
+pip install -r requirements.txt
 ```
 2. Fill keys in `.env`:
 ```bash
