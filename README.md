@@ -70,3 +70,35 @@ LANGSMITH_PROJECT=self-reflection-agent
 langgraph dev
 ```
 4. Open Studio UI from the URL shown in terminal and select graph `self_reflection_agent`.
+
+## Chat UI (agent-chat-ui)
+
+This repo includes `agent-chat-ui/` — a Next.js app that provides a chat interface for the LangGraph agent.
+
+### Setup
+```bash
+cd agent-chat-ui
+pnpm install
+```
+
+### Configure
+Copy the example env file and set the values:
+```bash
+cp agent-chat-ui/.env.example agent-chat-ui/.env
+```
+
+Required variables:
+```
+NEXT_PUBLIC_API_URL=http://localhost:2024
+NEXT_PUBLIC_ASSISTANT_ID=self_reflection_agent
+```
+
+> `NEXT_PUBLIC_API_URL` should point to your running `langgraph dev` server (default: `http://localhost:2024`).
+
+### Run
+```bash
+cd agent-chat-ui
+pnpm dev
+```
+
+The UI will be available at `http://localhost:3000`.
