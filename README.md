@@ -31,15 +31,26 @@ This project contains a LangGraph agent that iteratively generates and improves 
 
 ## Docker (recommended)
 
-Run both the agent and the chat UI with a single command:
+### Option A — 1Password (recommended, nothing written to disk)
+
+Secrets are injected directly from 1Password as environment variables — no file is ever created:
 
 ```bash
+op run --env-file=.env.tpl -- docker compose up --build --remove-orphans
+```
+
+> Requires `op` CLI signed in. `.env.tpl` contains only 1Password references, safe to commit.
+
+### Option B — manual env vars
+
+```bash
+export OPENROUTER_API_KEY=...
+export TAVILY_API_KEY=...
+export LANGSMITH_API_KEY=...
 docker compose up --build
 ```
 
 Then open **http://localhost:3000** in your browser.
-
-> Make sure your `.env` file is populated before running (see [Environment](#environment) below). The compose file reads it automatically for the backend; API keys are never exposed to the frontend container.
 
 Services started:
 | Service | URL |
