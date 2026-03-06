@@ -39,7 +39,7 @@ Secrets are injected directly from 1Password as environment variables — no fil
 op run --env-file=.env.tpl -- docker compose up --build --remove-orphans
 ```
 
-> Requires `op` CLI signed in. `.env.tpl` contains only 1Password references, safe to commit.
+> Requires `op` CLI signed in. `.env.tpl` contains only 1Password references.
 
 ### Option B — manual env vars
 
