@@ -1,4 +1,4 @@
-"""Unit tests for agent.py — all external calls are mocked."""
+"""Unit tests for agents/self_reflection_agent.py — all external calls are mocked."""
 from __future__ import annotations
 
 import sys
@@ -27,7 +27,7 @@ sys.modules.setdefault("config", MagicMock(
 
 # Patch cfg at module level before import
 with patch.dict("sys.modules", {}):
-    import agent  # noqa: E402
+    import agents.self_reflection_agent as agent  # noqa: E402
 
 agent.cfg = _mock_cfg  # inject mock config
 

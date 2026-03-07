@@ -7,7 +7,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY agent.py config.py langgraph.json ./
+COPY agents/ ./agents/
+COPY config.py langgraph.json ./
 
 EXPOSE 2024
 
