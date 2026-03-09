@@ -272,3 +272,9 @@ pnpm-debug.log*
 .gitguardian/
 gitleaks-report.json
 secret-report.json
+
+##########################################################
+# CLAUDE.md - AI ASSISTANT INSTRUCTIONS
+##########################################################
+
+CLAUDE.md
