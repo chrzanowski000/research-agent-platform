@@ -464,7 +464,7 @@ def synthesize_research(state: ResearchState) -> dict:
         "## Summary\nA 2-3 sentence overview of the topic.\n\n"
         "## Key Findings\nBullet points of the most important insights.\n\n"
         "## Practical Approaches\nMost relevant tools, libraries, or methods found.\n\n"
-        "## Sources\nNumbered list of the most useful sources with URLs.\n\n"
+        "## Sources\nNumbered list of ALL sources provided above with their URLs. Do not omit any.\n\n"
         "Be factual, concise, and cite sources by number."
     )
 
@@ -558,3 +558,30 @@ def run_agent(topic: str, max_searches: int = _DEFAULT_MAX_SEARCHES) -> Research
         "max_searches": max_searches,
         "messages": [HumanMessage(content=topic.strip())],
     })
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Run the research agent on a topic.")
+    parser.add_argument("topic", help="Research topic or question")
+    parser.add_argument(
+        "--max-searches",
+        type=int,
+        default=_DEFAULT_MAX_SEARCHES,
+        metavar="N",
+        help=f"Maximum number of search queries to run (1-10, default {_DEFAULT_MAX_SEARCHES})",
+    )
+    args = parser.parse_args()
+
+    try:
+        result = run_agent(args.topic, max_searches=args.max_searches)
+        print(result.get("synthesis", "No synthesis produced."))
+    except (ValueError, ConfigError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
