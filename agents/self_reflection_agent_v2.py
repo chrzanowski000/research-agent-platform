@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 try:
     cfg = Config.from_env()
+    cfg.log_models()
 except ConfigError as _cfg_err:
     logger.warning("Config incomplete: %s — some features may be unavailable.", _cfg_err)
     cfg = None  # type: ignore[assignment]
@@ -112,21 +113,32 @@ def _block_update(source: str, reason: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Model (singleton via lru_cache)
+# Models (one cached instance per node)
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def get_model() -> ChatOpenAI:
+def _make_model(model_name: str) -> ChatOpenAI:
     if cfg is None:
         raise ConfigError("Agent config not loaded — check your environment variables.")
     return ChatOpenAI(
-        model=cfg.model_name,
+        model=model_name,
         temperature=0,
         base_url=cfg.base_url,
         api_key=cfg.openrouter_api_key,
         timeout=cfg.request_timeout,
     )
+
+
+@lru_cache(maxsize=1)
+def get_generate_model() -> ChatOpenAI:
+    """Model used by the generate_answer node."""
+    return _make_model(cfg.reflection_v2_generate_model)
+
+
+@lru_cache(maxsize=1)
+def get_reflect_model() -> ChatOpenAI:
+    """Model used by the reflect_on_answer node."""
+    return _make_model(cfg.reflection_v2_reflect_model)
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +157,7 @@ def get_pii_middleware() -> list[PIIMiddleware]:
 
 def get_generation_agent():
     return create_agent(
-        model=get_model(),
+        model=get_generate_model(),
         tools=[],
         system_prompt=(
             "You are a concise assistant. Write a clear answer that addresses the user task. "
@@ -157,7 +169,7 @@ def get_generation_agent():
 
 def get_reflection_agent():
     return create_agent(
-        model=get_model(),
+        model=get_reflect_model(),
         tools=[],
         system_prompt=(
             "You are a strict reviewer. Evaluate the draft for: correctness, completeness, and clarity. "

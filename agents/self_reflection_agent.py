@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 try:
     cfg = Config.from_env()
+    cfg.log_models()
 except ConfigError as _cfg_err:
     logger.warning("Config incomplete: %s — some features may be unavailable.", _cfg_err)
     cfg = None  # type: ignore[assignment]
@@ -155,26 +156,38 @@ def _block_update(source: str, reason: str) -> dict:
     }
 
 # ---------------------------------------------------------------------------
-# Model (singleton via lru_cache)
+# Models (one cached instance per node)
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def get_model() -> ChatOpenAI:
-    """Return a cached ChatOpenAI instance configured from env.
-
-    Raises:
-        ConfigError: If config is not loaded.
-    """
+def _make_model(model_name: str) -> ChatOpenAI:
     if cfg is None:
         raise ConfigError("Agent config not loaded — check your environment variables.")
     return ChatOpenAI(
-        model=cfg.model_name,
+        model=model_name,
         temperature=0,
         base_url=cfg.base_url,
         api_key=cfg.openrouter_api_key,
         timeout=cfg.request_timeout,
     )
+
+
+@lru_cache(maxsize=1)
+def get_search_decision_model() -> ChatOpenAI:
+    """Model used by the search_decision node."""
+    return _make_model(cfg.reflection_v1_search_decision_model)
+
+
+@lru_cache(maxsize=1)
+def get_generate_model() -> ChatOpenAI:
+    """Model used by the generate_answer node."""
+    return _make_model(cfg.reflection_v1_generate_model)
+
+
+@lru_cache(maxsize=1)
+def get_reflect_model() -> ChatOpenAI:
+    """Model used by the reflect_on_answer node."""
+    return _make_model(cfg.reflection_v1_reflect_model)
 
 # ---------------------------------------------------------------------------
 # PII middleware
@@ -198,7 +211,7 @@ def get_generation_agent():
         Middleware-wrapped agent that writes or improves draft answers.
     """
     return create_agent(
-        model=get_model(),
+        model=get_generate_model(),
         tools=[],
         system_prompt=(
             "You are a concise assistant. Write a clear answer that addresses the user task. "
@@ -215,7 +228,7 @@ def get_reflection_agent():
         Middleware-wrapped agent that reviews drafts for quality.
     """
     return create_agent(
-        model=get_model(),
+        model=get_reflect_model(),
         tools=[],
         system_prompt=(
             "You are a strict reviewer. Evaluate the draft for: correctness, completeness, and clarity. "
@@ -352,7 +365,7 @@ def search_decision(state: AgentState) -> dict:
         "Use NEEDS_SEARCH=yes for current events, factual verification, or missing external data."
     )
 
-    raw = get_model().invoke([HumanMessage(content=decision_prompt)]).content
+    raw = get_search_decision_model().invoke([HumanMessage(content=decision_prompt)]).content
     if not isinstance(raw, str):
         raw = str(raw)
     needs_search, query = parse_search_decision(raw)

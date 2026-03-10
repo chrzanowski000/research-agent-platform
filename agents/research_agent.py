@@ -1,11 +1,12 @@
 """Research Agent: Plan-and-Execute deep research with web, arXiv, and GitHub search."""
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import re
 from functools import lru_cache
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 try:
     cfg = Config.from_env()
+    cfg.log_models()
 except ConfigError as _cfg_err:
     logger.warning("Config incomplete: %s — some features may be unavailable.", _cfg_err)
     cfg = None  # type: ignore[assignment]
@@ -43,6 +45,9 @@ except ConfigError as _cfg_err:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MAX_SEARCHES = 5
+
+# TODO: remove this constraint when ready to use all sources
+_ALLOWED_SOURCES: set[str] | None = {"arxiv"}  # set to None to allow all sources
 
 
 class ResearchState(MessagesState, total=False):
@@ -90,24 +95,38 @@ class ResearchState(MessagesState, total=False):
         ge=1,
         le=10,
     )]
+    date_filter: Annotated[dict, Field(
+        default_factory=dict,
+        description="Extracted date/year constraints from the topic. Keys: 'year' (int) or 'from'/'to' (int).",
+    )]
 
 # ---------------------------------------------------------------------------
-# Model (singleton via lru_cache)
+# Models (one cached instance per node)
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def get_model() -> ChatOpenAI:
-    """Return a cached ChatOpenAI instance configured from env."""
+def _make_model(model_name: str) -> ChatOpenAI:
     if cfg is None:
         raise ConfigError("Agent config not loaded — check your environment variables.")
     return ChatOpenAI(
-        model=cfg.model_name,
+        model=model_name,
         temperature=0,
         base_url=cfg.base_url,
         api_key=cfg.openrouter_api_key,
         timeout=cfg.request_timeout,
     )
+
+
+@lru_cache(maxsize=1)
+def get_planner_model() -> ChatOpenAI:
+    """Model used by the plan_research node."""
+    return _make_model(cfg.research_planner_model)
+
+
+@lru_cache(maxsize=1)
+def get_synthesizer_model() -> ChatOpenAI:
+    """Model used by the synthesize_research node."""
+    return _make_model(cfg.research_synthesizer_model)
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +140,18 @@ def get_model() -> ChatOpenAI:
     retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
     reraise=True,
 )
-def _tavily_search(query: str) -> list[dict]:
+def _tavily_search(query: str, date_filter: dict | None = None) -> list[dict]:
     """Run a Tavily web search and return result snippets."""
     if not cfg or not cfg.tavily_api_key:
         raise ConfigError("TAVILY_API_KEY is not set")
+    if date_filter:
+        year = date_filter.get("year") or date_filter.get("from")
+        month = date_filter.get("month")
+        if year and month:
+            month_name = next(k for k, v in _MONTH_NAMES.items() if v == month and len(k) > 3)
+            query = f"{query} {month_name} {year}"
+        elif year:
+            query = f"{query} {year}"
     client = TavilyClient(api_key=cfg.tavily_api_key)
     resp = client.search(query=query, topic="general", max_results=3, search_depth="advanced")
     results = []
@@ -138,11 +165,31 @@ def _tavily_search(query: str) -> list[dict]:
     return results
 
 
-def _arxiv_search(query: str) -> list[dict]:
+def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
     """Search arXiv for academic papers using the public API."""
     try:
-        encoded = httpx.URL(f"https://export.arxiv.org/api/query?search_query=all:{query}&max_results=3&sortBy=relevance")
-        resp = httpx.get(str(encoded), timeout=15)
+        search_query = f"all:{query}"
+        sort_by = "relevance"
+        if date_filter:
+            year = date_filter.get("year")
+            month = date_filter.get("month")
+            from_year = date_filter.get("from", year)
+            to_year = date_filter.get("to", year)
+            if from_year and to_year:
+                if month:
+                    last_day = calendar.monthrange(year, month)[1]
+                    from_ts = f"{year}{month:02d}010000"
+                    to_ts = f"{year}{month:02d}{last_day:02d}2359"
+                else:
+                    from_ts = f"{from_year}01010000"
+                    to_ts = f"{to_year}12312359"
+                # arXiv date range syntax — must be passed as a raw URL, not via httpx.URL()
+                # which would percent-encode the brackets and plus signs
+                date_clause = f"AND+submittedDate:[{from_ts}+TO+{to_ts}]"
+                search_query = f"all:{query}+{date_clause}"
+                sort_by = "submittedDate"
+        url = f"https://export.arxiv.org/api/query?search_query={search_query}&max_results=3&sortBy={sort_by}"
+        resp = httpx.get(url, timeout=15)
         resp.raise_for_status()
         # Parse atom XML minimally
         entries = re.findall(
@@ -165,9 +212,21 @@ def _arxiv_search(query: str) -> list[dict]:
         return []
 
 
-def _github_search(query: str) -> list[dict]:
+def _github_search(query: str, date_filter: dict | None = None) -> list[dict]:
     """Search GitHub repositories using the public search API."""
     try:
+        if date_filter:
+            year = date_filter.get("year")
+            month = date_filter.get("month")
+            from_year = date_filter.get("from", year)
+            to_year = date_filter.get("to", year)
+            if year and month:
+                last_day = calendar.monthrange(year, month)[1]
+                query = f"{query} created:{year}-{month:02d}-01..{year}-{month:02d}-{last_day:02d}"
+            elif year:
+                query = f"{query} created:{year}-01-01..{year}-12-31"
+            elif from_year and to_year:
+                query = f"{query} created:{from_year}-01-01..{to_year}-12-31"
         resp = httpx.get(
             "https://api.github.com/search/repositories",
             params={"q": query, "sort": "stars", "per_page": 3},
@@ -190,14 +249,70 @@ def _github_search(query: str) -> list[dict]:
         return []
 
 
-def _run_search(source: str, query: str) -> list[dict]:
+_MONTH_NAMES = {
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "may": 5,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
+
+_MONTH_PATTERN = "|".join(_MONTH_NAMES)
+
+
+def _extract_date_filter(topic: str) -> dict:
+    """Parse temporal constraints from the topic string.
+
+    Recognises patterns like:
+      - "in 2026 march" / "2025 february" / "march 2026"  → {"year": 2026, "month": 3}
+      - "in 2026" / "from 2026" / "since 2026"            → {"year": 2026}
+      - "2024-2025" / "2024 to 2025"                      → {"from": 2024, "to": 2025}
+    Returns an empty dict when no year is found.
+    """
+    # Year + month in either order: "2026 march" or "march 2026" or "in 2026 march"
+    ym_m = re.search(
+        rf"\b(20\d{{2}})\s+({_MONTH_PATTERN})\b|\b({_MONTH_PATTERN})\s+(20\d{{2}})\b",
+        topic,
+        re.IGNORECASE,
+    )
+    if ym_m:
+        if ym_m.group(1):
+            year, month_name = int(ym_m.group(1)), ym_m.group(2).lower()
+        else:
+            year, month_name = int(ym_m.group(4)), ym_m.group(3).lower()
+        return {"year": year, "month": _MONTH_NAMES[month_name]}
+
+    # Range: "2024-2025" or "2024 to 2025"
+    range_m = re.search(r"\b(20\d{2})\s*(?:-|to)\s*(20\d{2})\b", topic, re.IGNORECASE)
+    if range_m:
+        return {"from": int(range_m.group(1)), "to": int(range_m.group(2))}
+
+    # Single year with qualifiers or bare
+    single_m = re.search(
+        r"(?:in|from|since|before|after|year|published|created|submitted)?\s*(20\d{2})\b",
+        topic,
+        re.IGNORECASE,
+    )
+    if single_m:
+        return {"year": int(single_m.group(1))}
+    return {}
+
+
+def _run_search(source: str, query: str, date_filter: dict | None = None) -> list[dict]:
     """Dispatch to the correct search backend."""
     if source == "web":
-        return _tavily_search(query)
+        return _tavily_search(query, date_filter)
     if source == "arxiv":
-        return _arxiv_search(query)
+        return _arxiv_search(query, date_filter)
     if source == "github":
-        return _github_search(query)
+        return _github_search(query, date_filter)
     logger.warning("Unknown search source: %s", source)
     return []
 
@@ -223,6 +338,7 @@ def plan_research(state: ResearchState) -> dict:
              for m in reversed(messages) if isinstance(m, HumanMessage)),
             "",
         )
+        date_filter = _extract_date_filter(topic)
         reset = {
             "turn": human_msg_count,
             "topic": topic,
@@ -232,18 +348,33 @@ def plan_research(state: ResearchState) -> dict:
             "done": False,
             "blocked": False,
             "block_reason": "",
+            "date_filter": date_filter,
         }
-        logger.info("New research turn %d: topic=%r", human_msg_count, topic[:80])
+        logger.info("New research turn %d: topic=%r date_filter=%r", human_msg_count, topic[:80], date_filter)
     else:
         topic = state.get("topic", "")
+        date_filter = state.get("date_filter", {})
 
     max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
 
+    date_instruction = ""
+    if date_filter:
+        if "year" in date_filter and "month" in date_filter:
+            month_name = calendar.month_name[date_filter["month"]]
+            date_instruction = f"\nIMPORTANT: The user wants results specifically from {month_name} {date_filter['year']}. Include both the month and year in every query string."
+        elif "year" in date_filter:
+            date_instruction = f"\nIMPORTANT: The user wants results specifically from {date_filter['year']}. Include the year in every query string."
+        elif "from" in date_filter and "to" in date_filter:
+            date_instruction = f"\nIMPORTANT: The user wants results from {date_filter['from']} to {date_filter['to']}. Include this date range in every query string."
+
+    valid_sources = _ALLOWED_SOURCES or {"web", "arxiv", "github"}
+
     plan_prompt = (
         f"You are a research planner. Given the topic below, create a structured search plan.\n"
-        f"Topic: {topic}\n\n"
+        f"Topic: {topic}\n"
+        f"{date_instruction}\n"
         f"Return a JSON array of up to {max_searches} search tasks. Each task must have:\n"
-        '  - "source": one of "web", "arxiv", "github"\n'
+        f'  - "source": one of {", ".join(sorted(valid_sources))}\n'
         '  - "query": a concise search query string\n\n'
         "Focus: cover fundamentals, recent research, and practical implementations.\n"
         "Return ONLY the JSON array, no other text."
@@ -251,7 +382,7 @@ def plan_research(state: ResearchState) -> dict:
 
     logger.info("Planning research for topic: %r", topic[:80])
     try:
-        raw = get_model().invoke([HumanMessage(content=plan_prompt)]).content
+        raw = get_planner_model().invoke([HumanMessage(content=plan_prompt)]).content
         if not isinstance(raw, str):
             raw = str(raw)
         # Extract JSON array from response
@@ -261,14 +392,14 @@ def plan_research(state: ResearchState) -> dict:
         else:
             plan = []
         # Validate structure; drop malformed entries
-        valid_sources = {"web", "arxiv", "github"}
         plan = [
             p for p in plan
             if isinstance(p, dict) and p.get("source") in valid_sources and p.get("query")
         ][:max_searches]
     except Exception as exc:
         logger.error("Failed to parse search plan: %s", exc)
-        plan = [{"source": "web", "query": topic}]
+        default_source = next(iter(_ALLOWED_SOURCES)) if _ALLOWED_SOURCES else "web"
+        plan = [{"source": default_source, "query": topic}]
 
     logger.info("Search plan: %d tasks", len(plan))
     return {**reset, "search_plan": plan}
@@ -281,19 +412,24 @@ def execute_searches(state: ResearchState) -> dict:
         logger.warning("No search plan found — skipping searches")
         return {}
 
+    date_filter: dict = state.get("date_filter", {})
+
     all_results: list[dict] = []
     for task in plan:
         source = task.get("source", "web")
         query = task.get("query", "")
-        logger.info("Searching [%s]: %r", source, query[:80])
+        logger.info("Searching [%s]: %r (date_filter=%r)", source, query[:80], date_filter)
         try:
-            results = _run_search(source, query)
+            results = _run_search(source, query, date_filter)
             all_results.extend(results)
         except Exception as exc:
             logger.error("Search failed [%s] %r: %s", source, query[:60], exc)
 
-    logger.info("Collected %d search results total", len(all_results))
-    return {"search_results": all_results}
+    # Deduplicate by URL, preserving order
+    seen: set[str] = set()
+    unique_results = [r for r in all_results if not (r.get("url") in seen or seen.add(r.get("url", "")))]
+    logger.info("Collected %d results (%d after dedup)", len(all_results), len(unique_results))
+    return {"search_results": unique_results}
 
 
 def synthesize_research(state: ResearchState) -> dict:
@@ -334,7 +470,7 @@ def synthesize_research(state: ResearchState) -> dict:
 
     logger.info("Synthesizing %d results for topic: %r", len(results), topic[:80])
     try:
-        raw = get_model().invoke([HumanMessage(content=synthesis_prompt)]).content
+        raw = get_synthesizer_model().invoke([HumanMessage(content=synthesis_prompt)]).content
         brief = raw.strip() if isinstance(raw, str) else str(raw).strip()
     except Exception as exc:
         logger.error("Synthesis failed: %s", exc)
