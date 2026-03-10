@@ -45,6 +45,9 @@ class Config:
     # ── Global default ──────────────────────────────────────────────────────
     model_name: str = "nvidia/nemotron-3-nano-30b-a3b:free"
 
+    # ── duckling (date parsing) ─────────────────────────────────────────────
+    duckling_url: str = "http://localhost:8000"
+
     # ── self_reflection_agent (v1) node models ───────────────────────────
     reflection_v1_search_decision_model: str = ""
     reflection_v1_generate_model: str = ""
@@ -58,6 +61,9 @@ class Config:
     research_planner_model: str = ""
     research_synthesizer_model: str = ""
     research_filter_model: str = ""
+    research_topic_extractor_model: str = ""
+    research_keyword_expander_model: str = ""
+    research_query_generator_model: str = ""
 
     @classmethod
     def from_env(cls) -> Config:
@@ -94,6 +100,7 @@ class Config:
             langsmith_api_key=langsmith_key,
             langsmith_project=langsmith_project,
             model_name=global_model,
+            duckling_url=os.getenv("DUCKLING_URL", "http://localhost:8000"),
 
             # self_reflection_agent (v1)
             reflection_v1_search_decision_model=resolve_model(
@@ -132,6 +139,18 @@ class Config:
                 "RESEARCH_FILTER_MODEL", "RESEARCH_MODEL",
                 fallback=global_model,
             ),
+            research_topic_extractor_model=resolve_model(
+                "RESEARCH_TOPIC_EXTRACTOR_MODEL", "RESEARCH_PLANNER_MODEL", "RESEARCH_MODEL",
+                fallback=global_model,
+            ),
+            research_keyword_expander_model=resolve_model(
+                "RESEARCH_KEYWORD_EXPANDER_MODEL", "RESEARCH_PLANNER_MODEL", "RESEARCH_MODEL",
+                fallback=global_model,
+            ),
+            research_query_generator_model=resolve_model(
+                "RESEARCH_QUERY_GENERATOR_MODEL", "RESEARCH_PLANNER_MODEL", "RESEARCH_MODEL",
+                fallback=global_model,
+            ),
         )
 
     def log_models(self) -> None:
@@ -157,6 +176,9 @@ class Config:
             f"│   planner           : {self.research_planner_model}\n"
             f"│   filter            : {self.research_filter_model}\n"
             f"│   synthesizer       : {self.research_synthesizer_model}\n"
+            f"│   topic_extractor   : {self.research_topic_extractor_model}\n"
+            f"│   keyword_expander  : {self.research_keyword_expander_model}\n"
+            f"│   query_generator   : {self.research_query_generator_model}\n"
             "└────────────────────────────────────────────────────────────┘",
             file=sys.stderr,
             flush=True,

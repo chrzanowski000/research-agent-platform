@@ -13,6 +13,7 @@ services:
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-self-reflection-agent}
       TAVILY_API_KEY: ${TAVILY_API_KEY}
+      DUCKLING_URL: ${DUCKLING_URL:-http://duckling:8000}
       # Startup diagnostics
       LOG_MODELS: ${LOG_MODELS:-false}
       # Per-agent/node model overrides
@@ -26,6 +27,9 @@ services:
       REFLECTION_V2_MODEL: ${REFLECTION_V2_MODEL:-}
       REFLECTION_V2_GENERATE_MODEL: ${REFLECTION_V2_GENERATE_MODEL:-}
       REFLECTION_V2_REFLECT_MODEL: ${REFLECTION_V2_REFLECT_MODEL:-}
+    depends_on:
+      duckling:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2024/ok"]
       interval: 5s
@@ -46,3 +50,8 @@ services:
     depends_on:
       agent:
         condition: service_healthy
+
+  duckling:
+    image: rasa/duckling
+    ports:
+      - "8000:8000"

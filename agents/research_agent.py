@@ -1,7 +1,6 @@
 """Research Agent: Plan-and-Execute deep research with web, arXiv, and GitHub search."""
 from __future__ import annotations
 
-import calendar
 import json
 import logging
 import re
@@ -99,6 +98,18 @@ class ResearchState(MessagesState, total=False):
         default_factory=dict,
         description="Extracted date/year constraints from the topic. Keys: 'year' (int) or 'from'/'to' (int).",
     )]
+    topics: Annotated[list[str], Field(
+        default_factory=list,
+        description="3–8 academic sub-topics extracted from the user query.",
+    )]
+    expanded_keywords: Annotated[list[str], Field(
+        default_factory=list,
+        description="Up to 20 deduplicated keyword phrases expanded from topics.",
+    )]
+    arxiv_queries: Annotated[list[str], Field(
+        default_factory=list,
+        description="5–15 bare keyword query strings before search_plan assembly.",
+    )]
 
 # ---------------------------------------------------------------------------
 # Models (one cached instance per node)
@@ -135,6 +146,19 @@ def get_filter_model() -> ChatOpenAI:
     return _make_model(cfg.research_filter_model)
 
 
+@lru_cache(maxsize=1)
+def get_topic_extractor_model() -> ChatOpenAI:
+    return _make_model(cfg.research_topic_extractor_model)
+
+@lru_cache(maxsize=1)
+def get_keyword_expander_model() -> ChatOpenAI:
+    return _make_model(cfg.research_keyword_expander_model)
+
+@lru_cache(maxsize=1)
+def get_query_generator_model() -> ChatOpenAI:
+    return _make_model(cfg.research_query_generator_model)
+
+
 # ---------------------------------------------------------------------------
 # Search helpers
 # ---------------------------------------------------------------------------
@@ -151,13 +175,11 @@ def _tavily_search(query: str, date_filter: dict | None = None) -> list[dict]:
     if not cfg or not cfg.tavily_api_key:
         raise ConfigError("TAVILY_API_KEY is not set")
     if date_filter:
-        year = date_filter.get("year") or date_filter.get("from")
-        month = date_filter.get("month")
-        if year and month:
-            month_name = next(k for k, v in _MONTH_NAMES.items() if v == month and len(k) > 3)
-            query = f"{query} {month_name} {year}"
-        elif year:
-            query = f"{query} {year}"
+        start = date_filter.get("start_date", "")
+        end = date_filter.get("end_date", "")
+        if start:
+            year = start[:4]
+            query = f"{query} {year}" if end[:4] == year else f"{query} {start} {end}"
     client = TavilyClient(api_key=cfg.tavily_api_key)
     resp = client.search(query=query, topic="general", max_results=3, search_depth="advanced")
     results = []
@@ -177,20 +199,12 @@ def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
         search_query = f"all:{query}"
         sort_by = "relevance"
         if date_filter:
-            year = date_filter.get("year")
-            month = date_filter.get("month")
-            from_year = date_filter.get("from", year)
-            to_year = date_filter.get("to", year)
-            if from_year and to_year:
-                if month:
-                    last_day = calendar.monthrange(year, month)[1]
-                    from_ts = f"{year}{month:02d}010000"
-                    to_ts = f"{year}{month:02d}{last_day:02d}2359"
-                else:
-                    from_ts = f"{from_year}01010000"
-                    to_ts = f"{to_year}12312359"
-                # arXiv date range syntax — must be passed as a raw URL, not via httpx.URL()
-                # which would percent-encode the brackets and plus signs
+            start = date_filter.get("start_date", "")
+            end = date_filter.get("end_date", "")
+            if start and end:
+                # arXiv timestamp format: YYYYMMDDHHMMSS
+                from_ts = start.replace("-", "") + "010000"
+                to_ts = end.replace("-", "") + "2359"
                 date_clause = f"AND+submittedDate:[{from_ts}+TO+{to_ts}]"
                 search_query = f"all:{query}+{date_clause}"
                 sort_by = "submittedDate"
@@ -222,17 +236,12 @@ def _github_search(query: str, date_filter: dict | None = None) -> list[dict]:
     """Search GitHub repositories using the public search API."""
     try:
         if date_filter:
-            year = date_filter.get("year")
-            month = date_filter.get("month")
-            from_year = date_filter.get("from", year)
-            to_year = date_filter.get("to", year)
-            if year and month:
-                last_day = calendar.monthrange(year, month)[1]
-                query = f"{query} created:{year}-{month:02d}-01..{year}-{month:02d}-{last_day:02d}"
-            elif year:
-                query = f"{query} created:{year}-01-01..{year}-12-31"
-            elif from_year and to_year:
-                query = f"{query} created:{from_year}-01-01..{to_year}-12-31"
+            start = date_filter.get("start_date", "")
+            end = date_filter.get("end_date", "")
+            if start and end:
+                query = f"{query} created:{start}..{end}"
+            elif start:
+                query = f"{query} created:>={start}"
         resp = httpx.get(
             "https://api.github.com/search/repositories",
             params={"q": query, "sort": "stars", "per_page": 3},
@@ -255,61 +264,6 @@ def _github_search(query: str, date_filter: dict | None = None) -> list[dict]:
         return []
 
 
-_MONTH_NAMES = {
-    "january": 1, "jan": 1,
-    "february": 2, "feb": 2,
-    "march": 3, "mar": 3,
-    "april": 4, "apr": 4,
-    "may": 5,
-    "june": 6, "jun": 6,
-    "july": 7, "jul": 7,
-    "august": 8, "aug": 8,
-    "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10,
-    "november": 11, "nov": 11,
-    "december": 12, "dec": 12,
-}
-
-_MONTH_PATTERN = "|".join(_MONTH_NAMES)
-
-
-def _extract_date_filter(topic: str) -> dict:
-    """Parse temporal constraints from the topic string.
-
-    Recognises patterns like:
-      - "in 2026 march" / "2025 february" / "march 2026"  → {"year": 2026, "month": 3}
-      - "in 2026" / "from 2026" / "since 2026"            → {"year": 2026}
-      - "2024-2025" / "2024 to 2025"                      → {"from": 2024, "to": 2025}
-    Returns an empty dict when no year is found.
-    """
-    # Year + month in either order: "2026 march" or "march 2026" or "in 2026 march"
-    ym_m = re.search(
-        rf"\b(20\d{{2}})\s+({_MONTH_PATTERN})\b|\b({_MONTH_PATTERN})\s+(20\d{{2}})\b",
-        topic,
-        re.IGNORECASE,
-    )
-    if ym_m:
-        if ym_m.group(1):
-            year, month_name = int(ym_m.group(1)), ym_m.group(2).lower()
-        else:
-            year, month_name = int(ym_m.group(4)), ym_m.group(3).lower()
-        return {"year": year, "month": _MONTH_NAMES[month_name]}
-
-    # Range: "2024-2025" or "2024 to 2025"
-    range_m = re.search(r"\b(20\d{2})\s*(?:-|to)\s*(20\d{2})\b", topic, re.IGNORECASE)
-    if range_m:
-        return {"from": int(range_m.group(1)), "to": int(range_m.group(2))}
-
-    # Single year with qualifiers or bare
-    single_m = re.search(
-        r"(?:in|from|since|before|after|year|published|created|submitted)?\s*(20\d{2})\b",
-        topic,
-        re.IGNORECASE,
-    )
-    if single_m:
-        return {"year": int(single_m.group(1))}
-    return {}
-
 
 def _run_search(source: str, query: str, date_filter: dict | None = None) -> list[dict]:
     """Dispatch to the correct search backend."""
@@ -322,17 +276,115 @@ def _run_search(source: str, query: str, date_filter: dict | None = None) -> lis
     logger.warning("Unknown search source: %s", source)
     return []
 
+
+def _parse_duckling_time(text: str) -> dict:
+    """Call duckling to extract a time interval from text.
+
+    Returns {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"} or {}.
+    """
+    if not cfg:
+        return {}
+    duckling_url = getattr(cfg, "duckling_url", "http://localhost:8000")
+    try:
+        resp = httpx.post(
+            f"{duckling_url}/parse",
+            data={"locale": "en_US", "text": text, "dims": '["time"]'},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        entities = resp.json()
+    except Exception as exc:
+        logger.warning("Duckling request failed: %s", exc)
+        return {}
+
+    for entity in entities:
+        if entity.get("dim") != "time":
+            continue
+        val = entity.get("value", {})
+        vtype = val.get("type")
+
+        if vtype == "interval":
+            from_val = val.get("from", {}).get("value", "")
+            to_val = val.get("to", {}).get("value", "")
+            from_grain = val.get("from", {}).get("grain", "day")
+            to_grain = val.get("to", {}).get("grain", "day")
+            if from_val and to_val:
+                start = _duckling_ts_to_date(from_val, grain=from_grain, end=False)
+                # to_val is exclusive in duckling intervals — pass exclusive=True
+                end = _duckling_ts_to_date(to_val, grain=to_grain, end=True, exclusive=True)
+                if start and end:
+                    return {"start_date": start, "end_date": end}
+
+        elif vtype == "value":
+            point_val = val.get("value", "")
+            grain = val.get("grain", "day")
+            if point_val:
+                start = _duckling_ts_to_date(point_val, grain=grain, end=False)
+                end = _duckling_ts_to_date(point_val, grain=grain, end=True)
+                if start and end:
+                    return {"start_date": start, "end_date": end}
+
+    return {}
+
+
+def _duckling_ts_to_date(ts: str, grain: str = "day", end: bool = False, exclusive: bool = False) -> str:
+    """Convert a duckling ISO timestamp to an inclusive YYYY-MM-DD date string.
+
+    Duckling interval `to` values are EXCLUSIVE (e.g. "2027-01-01" means up to
+    but not including that date). Pass exclusive=True for interval `to` values
+    so the helper subtracts one day to get the inclusive end date before expanding
+    to grain boundary.
+
+    For year grain:  start → YYYY-01-01,  end (inclusive) → YYYY-12-31
+    For month grain: start → YYYY-MM-01,  end (inclusive) → YYYY-MM-<last>
+    For day/hour/etc: use the date portion as-is.
+    """
+    import calendar as _cal
+    from datetime import date as _date, timedelta as _td
+    try:
+        date_part = ts[:10]  # "YYYY-MM-DD"
+        year, month, day = int(date_part[:4]), int(date_part[5:7]), int(date_part[8:10])
+
+        # Duckling interval `to` is exclusive — subtract one day to make it inclusive
+        if exclusive and end:
+            d = _date(year, month, day) - _td(days=1)
+            year, month, day = d.year, d.month, d.day
+
+        if grain == "year":
+            return f"{year}-12-31" if end else f"{year}-01-01"
+        if grain == "month":
+            last_day = _cal.monthrange(year, month)[1]
+            return f"{year}-{month:02d}-{last_day:02d}" if end else f"{year}-{month:02d}-01"
+        return f"{year}-{month:02d}-{day:02d}"
+    except Exception:
+        return ""
+
+
+def parse_dates(state: ResearchState) -> dict:
+    """First node: extract date constraints from the latest HumanMessage via duckling.
+
+    Writes date_filter with start_date/end_date ISO strings, or {} if no dates found.
+    """
+    messages = state.get("messages", [])
+    text = next(
+        (m.content if isinstance(m.content, str) else str(m.content)
+         for m in reversed(messages) if isinstance(m, HumanMessage)),
+        "",
+    )
+    if not text:
+        return {"date_filter": {}}
+
+    date_filter = _parse_duckling_time(text)
+    logger.info("parse_dates: %r → %r", text[:80], date_filter)
+    return {"date_filter": date_filter}
+
 # ---------------------------------------------------------------------------
 # Nodes
 # ---------------------------------------------------------------------------
 
 
-def plan_research(state: ResearchState) -> dict:
-    """Extract the topic and generate a structured search plan.
-
-    Detects new turns (new HumanMessage) and resets per-turn state.
-    Asks the LLM to return a JSON search plan with up to max_searches tasks.
-    """
+def extract_topics(state: ResearchState) -> dict:
+    """First planning node: detect new turn, reset per-turn state, extract academic topics."""
     messages = state.get("messages", [])
     human_msg_count = sum(1 for m in messages if isinstance(m, HumanMessage))
     current_turn = state.get("turn", 0)
@@ -344,71 +396,142 @@ def plan_research(state: ResearchState) -> dict:
              for m in reversed(messages) if isinstance(m, HumanMessage)),
             "",
         )
-        date_filter = _extract_date_filter(topic)
         reset = {
             "turn": human_msg_count,
             "topic": topic,
+            "topics": [],
+            "expanded_keywords": [],
+            "arxiv_queries": [],
             "search_plan": [],
             "search_results": [],
             "synthesis": "",
             "done": False,
             "blocked": False,
             "block_reason": "",
-            "date_filter": date_filter,
         }
-        logger.info("New research turn %d: topic=%r date_filter=%r", human_msg_count, topic[:80], date_filter)
+        logger.info("New research turn %d: topic=%r", human_msg_count, topic[:80])
     else:
         topic = state.get("topic", "")
-        date_filter = state.get("date_filter", {})
 
-    max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
-
-    date_instruction = ""
-    if date_filter:
-        if "year" in date_filter and "month" in date_filter:
-            month_name = calendar.month_name[date_filter["month"]]
-            date_instruction = f"\nIMPORTANT: The user wants results specifically from {month_name} {date_filter['year']}. Include both the month and year in every query string."
-        elif "year" in date_filter:
-            date_instruction = f"\nIMPORTANT: The user wants results specifically from {date_filter['year']}. Include the year in every query string."
-        elif "from" in date_filter and "to" in date_filter:
-            date_instruction = f"\nIMPORTANT: The user wants results from {date_filter['from']} to {date_filter['to']}. Include this date range in every query string."
-
-    valid_sources = _ALLOWED_SOURCES or {"web", "arxiv", "github"}
-
-    plan_prompt = (
-        f"You are a research planner. Given the topic below, create a structured search plan.\n"
-        f"Topic: {topic}\n"
-        f"{date_instruction}\n"
-        f"Return a JSON array of up to {max_searches} search tasks. Each task must have:\n"
-        f'  - "source": one of {", ".join(sorted(valid_sources))}\n'
-        '  - "query": a concise search query string\n\n'
-        "Focus: cover fundamentals, recent research, and practical implementations.\n"
-        "Return ONLY the JSON array, no other text."
+    prompt = (
+        f"You are an academic research analyst.\n\n"
+        f"User query: {topic}\n\n"
+        f"Extract 3 to 8 distinct academic research sub-topics or angles that together cover "
+        f"the scope of this query. Each topic should be a short noun phrase (3–6 words) "
+        f"suitable for academic literature search on arXiv.\n\n"
+        f"Rules:\n"
+        f"- Return ONLY a JSON array of strings, e.g. [\"topic one\", \"topic two\"]\n"
+        f"- No duplicates, no generic topics like \"overview\" or \"introduction\"\n"
+        f"- Do NOT include the query verbatim as a topic"
     )
-
-    logger.info("Planning research for topic: %r", topic[:80])
+    topics: list[str] = []
     try:
-        raw = get_planner_model().invoke([HumanMessage(content=plan_prompt)]).content
+        raw = get_topic_extractor_model().invoke([HumanMessage(content=prompt)]).content
         if not isinstance(raw, str):
             raw = str(raw)
-        # Extract JSON array from response
-        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        match = re.search(r"\[.*?\]", raw, re.DOTALL)
         if match:
-            plan: list[dict] = json.loads(match.group())
-        else:
-            plan = []
-        # Validate structure; drop malformed entries
-        plan = [
-            p for p in plan
-            if isinstance(p, dict) and p.get("source") in valid_sources and p.get("query")
-        ][:max_searches]
+            parsed = json.loads(match.group())
+            topics = [t for t in parsed if isinstance(t, str) and t.strip()][:8]
     except Exception as exc:
-        logger.error("Failed to parse search plan: %s", exc)
-        default_source = next(iter(_ALLOWED_SOURCES)) if _ALLOWED_SOURCES else "web"
-        plan = [{"source": default_source, "query": topic}]
+        logger.warning("extract_topics LLM failed: %s", exc)
 
-    logger.info("Search plan: %d tasks", len(plan))
-    return {**reset, "search_plan": plan}
+    if not topics:
+        topics = [topic] if topic else []
+    logger.info("extract_topics: %d topics", len(topics))
+    return {**reset, "topics": topics}
+
+
+def expand_keywords(state: ResearchState) -> dict:
+    """Expand extracted topics into a deduplicated set of search keywords (max 20)."""
+    topics = state.get("topics", [])
+    topics_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(topics))
+
+    prompt = (
+        f"You are a research librarian specializing in academic keyword expansion.\n\n"
+        f"Research topics:\n{topics_text}\n\n"
+        f"For each topic, generate related keywords, synonyms, and closely related concepts "
+        f"that would help find relevant papers on arXiv. Think about:\n"
+        f"- Technical synonyms\n"
+        f"- Related subtechniques or methods\n"
+        f"- Application domains\n\n"
+        f"Return ONLY a JSON array of keyword strings (max 20 total, deduplicated). "
+        f"Each keyword should be 1–5 words."
+    )
+    keywords: list[str] = []
+    try:
+        raw = get_keyword_expander_model().invoke([HumanMessage(content=prompt)]).content
+        if not isinstance(raw, str):
+            raw = str(raw)
+        match = re.search(r"\[.*?\]", raw, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            seen: dict[str, None] = {}
+            for k in parsed:
+                if isinstance(k, str) and k.strip() and k not in seen:
+                    seen[k] = None
+            keywords = list(seen)[:20]
+    except Exception as exc:
+        logger.warning("expand_keywords LLM failed: %s", exc)
+
+    if not keywords:
+        keywords = topics  # fallback: use topics as keywords
+    logger.info("expand_keywords: %d keywords", len(keywords))
+    return {"expanded_keywords": keywords}
+
+
+def generate_arxiv_queries(state: ResearchState) -> dict:
+    """Generate 5–max_searches bare arXiv keyword query strings from expanded_keywords."""
+    keywords = state.get("expanded_keywords", [])
+    max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
+    keywords_text = ", ".join(keywords)
+
+    prompt = (
+        f"You are an arXiv search expert.\n\n"
+        f"Available keywords: {keywords_text}\n\n"
+        f"Generate between 5 and {max_searches} arXiv search queries using these keywords.\n"
+        f"Each query should combine 2–4 keywords into a meaningful phrase targeting a different angle.\n\n"
+        f"Rules:\n"
+        f"- Return ONLY a JSON array of query strings\n"
+        f"- Do NOT add an 'all:' prefix — the search system adds it automatically\n"
+        f"- No duplicate keyword combinations\n\n"
+        f"Example: [\"transformer attention mechanism\", \"BERT language model fine-tuning\"]"
+    )
+    queries: list[str] = []
+    try:
+        raw = get_query_generator_model().invoke([HumanMessage(content=prompt)]).content
+        if not isinstance(raw, str):
+            raw = str(raw)
+        match = re.search(r"\[.*?\]", raw, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            queries = [q for q in parsed if isinstance(q, str) and q.strip()][:max_searches]
+    except Exception as exc:
+        logger.warning("generate_arxiv_queries LLM failed: %s", exc)
+
+    if not queries:
+        queries = keywords[:max_searches] or [state.get("topic", "")]
+    logger.info("generate_arxiv_queries: %d queries", len(queries))
+    return {"arxiv_queries": queries}
+
+
+def apply_date_filter(state: ResearchState) -> dict:
+    """Assemble search_plan from arxiv_queries. date_filter is left intact for _arxiv_search."""
+    queries = state.get("arxiv_queries", [])
+    max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
+
+    if not queries:
+        topic = state.get("topic", "")
+        queries = [topic] if topic else []
+
+    if not queries:
+        logger.warning("apply_date_filter: no queries, blocking")
+        return {"search_plan": [], "blocked": True, "block_reason": "No search queries could be generated."}
+
+    queries = queries[:max_searches]
+    search_plan = [{"source": "arxiv", "query": q} for q in queries]
+    logger.info("apply_date_filter: %d search tasks", len(search_plan))
+    return {"search_plan": search_plan}
 
 
 def execute_searches(state: ResearchState) -> dict:
@@ -442,6 +565,7 @@ def filter_results(state: ResearchState) -> dict:
     """Use an LLM to drop search results that are not relevant to the topic."""
     topic = state.get("topic", "")
     results: list[dict] = state.get("search_results", [])
+    date_filter: dict = state.get("date_filter", {})
 
     if not results:
         return {}
@@ -455,12 +579,32 @@ def filter_results(state: ResearchState) -> dict:
         )
     results_text = "\n\n".join(lines)
 
+    date_constraint_text = ""
+    if date_filter:
+        start = date_filter.get("start_date", "")
+        end = date_filter.get("end_date", "")
+        if start and end and start == end:
+            date_constraint_text = (
+                f"\nDATE CONSTRAINT: Only keep results published on {start}. "
+                f"Reject any result that clearly belongs to a different date."
+            )
+        elif start and end:
+            date_constraint_text = (
+                f"\nDATE CONSTRAINT: Only keep results published between {start} and {end}. "
+                f"Reject any result that clearly falls outside this range."
+            )
+
     filter_prompt = (
         f"You are a research relevance filter.\n"
-        f"Topic: {topic}\n\n"
-        f"Below are {len(results)} search results. Return a JSON array of the 1-based indices "
-        f"of results that are clearly relevant to the topic. "
-        f"Drop results that are off-topic, too generic, or clearly unrelated.\n"
+        f"Topic: {topic}"
+        + (f"\n{date_constraint_text}" if date_constraint_text else "")
+        + f"\n\nBelow are {len(results)} search results. Return a JSON array of the 1-based indices "
+        f"of results that are clearly relevant to the topic"
+        + (" and satisfy the date constraint above" if date_constraint_text else "")
+        + ".\n"
+        f"Drop results that are off-topic, too generic, or clearly unrelated"
+        + (", or from the wrong time period" if date_constraint_text else "")
+        + ".\n"
         f"Return ONLY the JSON array, e.g. [1, 3, 5].\n\n"
         f"{results_text}"
     )
@@ -492,6 +636,7 @@ def synthesize_research(state: ResearchState) -> dict:
     """Synthesize all search results into a structured research brief."""
     topic = state.get("topic", "")
     results: list[dict] = state.get("search_results", [])
+    date_filter: dict = state.get("date_filter", {})
 
     if not results:
         logger.warning("No search results to synthesize")
@@ -512,17 +657,43 @@ def synthesize_research(state: ResearchState) -> dict:
         )
     results_text = "\n\n".join(formatted)
 
-    synthesis_prompt = (
-        f"You are a research analyst. Synthesize the following search results into a structured brief.\n\n"
-        f"Research topic: {topic}\n\n"
-        f"Search results:\n{results_text}\n\n"
-        "Write a concise research brief with these sections:\n"
-        "## Summary\nA 2-3 sentence overview of the topic.\n\n"
-        "## Key Findings\nBullet points of the most important insights.\n\n"
-        "## Practical Approaches\nMost relevant tools, libraries, or methods found.\n\n"
-        "## Sources\nNumbered list of ALL sources provided above with their URLs. Do not omit any.\n\n"
-        "Be factual, concise, and cite sources by number."
-    )
+    temporal_scope_text = ""
+    date_note_instruction = ""
+    if date_filter:
+        start = date_filter.get("start_date", "")
+        end = date_filter.get("end_date", "")
+        if start and end:
+            scope = f"{start} to {end}" if start != end else start
+            temporal_scope_text = f"Requested time period: {scope}"
+            date_note_instruction = (
+                f"For each finding, note the publication/submission date if visible in the snippet. "
+                f"If any result appears to be from outside {scope}, flag it explicitly."
+            )
+
+    if date_filter:
+        synthesis_prompt = (
+            f"You are a research analyst. Synthesize the following search results into a structured brief.\n\n"
+            f"Research topic: {topic}\n"
+            f"{temporal_scope_text}\n\n"
+            f"Search results:\n{results_text}\n\n"
+            "Write a concise research brief with these sections:\n"
+            f"## Summary\nA 2-3 sentence overview of what was found within the requested time period.\n\n"
+            f"## Key Findings\nBullet points of the most important insights. {date_note_instruction}\n\n"
+            "## Sources\nNumbered list of ALL sources provided above with their URLs and publication dates where available. Do not omit any.\n\n"
+            "Be factual, concise, and cite sources by number."
+        )
+    else:
+        synthesis_prompt = (
+            f"You are a research analyst. Synthesize the following search results into a structured brief.\n\n"
+            f"Research topic: {topic}\n\n"
+            f"Search results:\n{results_text}\n\n"
+            "Write a concise research brief with these sections:\n"
+            "## Summary\nA 2-3 sentence overview of the topic.\n\n"
+            "## Key Findings\nBullet points of the most important insights.\n\n"
+            "## Practical Approaches\nMost relevant tools, libraries, or methods found.\n\n"
+            "## Sources\nNumbered list of ALL sources provided above with their URLs. Do not omit any.\n\n"
+            "Be factual, concise, and cite sources by number."
+        )
 
     logger.info("Synthesizing %d results for topic: %r", len(results), topic[:80])
     try:
@@ -544,8 +715,10 @@ def synthesize_research(state: ResearchState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def route_after_plan(state: ResearchState) -> Literal["execute_searches", "__end__"]:
-    """Route after planning: to search execution or end if blocked."""
+def route_after_apply_date_filter(
+    state: ResearchState,
+) -> Literal["execute_searches", "__end__"]:
+    """Route after apply_date_filter: to search execution or end if blocked."""
     if state.get("blocked", False):
         return "__end__"
     if not state.get("search_plan"):
@@ -561,15 +734,23 @@ def route_after_plan(state: ResearchState) -> Literal["execute_searches", "__end
 def build_graph() -> StateGraph:
     """Build and compile the LangGraph research agent graph."""
     graph = StateGraph(ResearchState)
-    graph.add_node("plan_research", plan_research)
+    graph.add_node("parse_dates", parse_dates)
+    graph.add_node("extract_topics", extract_topics)
+    graph.add_node("expand_keywords", expand_keywords)
+    graph.add_node("generate_arxiv_queries", generate_arxiv_queries)
+    graph.add_node("apply_date_filter", apply_date_filter)
     graph.add_node("execute_searches", execute_searches)
     graph.add_node("filter_results", filter_results)
     graph.add_node("synthesize", synthesize_research)
 
-    graph.set_entry_point("plan_research")
+    graph.set_entry_point("parse_dates")
+    graph.add_edge("parse_dates", "extract_topics")
+    graph.add_edge("extract_topics", "expand_keywords")
+    graph.add_edge("expand_keywords", "generate_arxiv_queries")
+    graph.add_edge("generate_arxiv_queries", "apply_date_filter")
     graph.add_conditional_edges(
-        "plan_research",
-        route_after_plan,
+        "apply_date_filter",
+        route_after_apply_date_filter,
         {"execute_searches": "execute_searches", "__end__": END},
     )
     graph.add_edge("execute_searches", "filter_results")
