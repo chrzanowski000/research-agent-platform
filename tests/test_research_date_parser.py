@@ -275,3 +275,130 @@ def test_validate_date_range_unparseable_url_kept():
     }
     result = ra.validate_date_range(state)
     assert result["search_results"][0]["title"] == "Old Format"
+
+
+# ---------------------------------------------------------------------------
+# extract_research_intent / generate_semantic_queries / normalize_queries / rank_results_by_similarity tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_research_intent_returns_valid_schema():
+    """Intent extraction returns a dict with all three required keys as lists."""
+    state = {
+        "messages": [HumanMessage(content="quantum parameter estimation using machine learning")],
+        "turn": 0,
+    }
+    mock_resp = MagicMock()
+    mock_resp.content = (
+        '{"problem_domains": ["quantum parameter estimation", "quantum metrology"], '
+        '"methods": ["machine learning", "neural networks"], '
+        '"related_concepts": ["quantum sensing"]}'
+    )
+    with patch.object(ra, "get_topic_extractor_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_resp))):
+        result = ra.extract_research_intent(state)
+
+    intent = result["research_intent"]
+    assert isinstance(intent.get("problem_domains"), list)
+    assert isinstance(intent.get("methods"), list)
+    assert isinstance(intent.get("related_concepts"), list)
+    assert len(intent["problem_domains"]) >= 1
+
+
+def test_generate_semantic_queries_include_problem_domain():
+    """Semantic queries produced by generate_semantic_queries include at least one problem domain term."""
+    state = {
+        "research_intent": {
+            "problem_domains": ["quantum metrology"],
+            "methods": ["machine learning"],
+            "related_concepts": [],
+        },
+        "topics": [],
+    }
+    mock_resp = MagicMock()
+    mock_resp.content = '["quantum metrology machine learning", "quantum metrology neural networks"]'
+    with patch.object(ra, "get_keyword_expander_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_resp))):
+        result = ra.generate_semantic_queries(state)
+
+    queries = result["expanded_keywords"]
+    assert any("quantum metrology" in q for q in queries)
+
+
+def test_normalize_queries_deduplicates():
+    """Query normalization removes duplicate strings from LLM output."""
+    state = {
+        "expanded_keywords": ["quantum sensing machine learning"],
+        "research_intent": {"problem_domains": ["quantum sensing"], "methods": [], "related_concepts": []},
+        "max_searches": 5,
+        "topic": "quantum sensing",
+    }
+    mock_resp = MagicMock()
+    # LLM returns duplicates
+    mock_resp.content = (
+        '["quantum sensing machine learning", "quantum sensing machine learning", '
+        '"quantum sensing neural network"]'
+    )
+    with patch.object(ra, "get_query_generator_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_resp))):
+        result = ra.normalize_queries(state)
+
+    queries = result["arxiv_queries"]
+    assert len(queries) == len(set(queries)), "Duplicate queries were not removed"
+
+
+def test_rank_results_by_similarity_removes_low_similarity_paper():
+    """Embedding-based ranking drops papers whose cosine similarity is below threshold."""
+    state = {
+        "topic": "quantum sensing",
+        "search_results": [
+            {"source": "arxiv", "title": "Relevant Paper", "url": "u1", "snippet": "quantum sensing stuff"},
+            {"source": "arxiv", "title": "Unrelated Paper", "url": "u2", "snippet": "cooking recipes"},
+        ],
+    }
+    # query_emb and relevant_emb are aligned (high dot product); unrelated_emb is not
+    query_emb = [1.0, 0.0]
+    relevant_emb = [1.0, 0.0]   # sim = 1.0 → kept
+    unrelated_emb = [0.0, 1.0]  # sim = 0.0 → dropped
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed_query.return_value = query_emb
+    mock_embedder.embed_documents.return_value = [relevant_emb, unrelated_emb]
+
+    with patch.object(ra, "get_embedding_model", return_value=mock_embedder):
+        result = ra.rank_results_by_similarity(state)
+
+    assert len(result["search_results"]) == 1
+    assert result["search_results"][0]["title"] == "Relevant Paper"
+
+
+def test_node_pipeline_state_propagation():
+    """extract_research_intent → generate_semantic_queries → normalize_queries passes state correctly."""
+    messages = [HumanMessage(content="quantum error correction")]
+
+    # --- extract_research_intent ---
+    mock_intent_resp = MagicMock()
+    mock_intent_resp.content = (
+        '{"problem_domains": ["quantum error correction"], '
+        '"methods": ["stabilizer codes"], "related_concepts": ["fault tolerance"]}'
+    )
+    with patch.object(ra, "get_topic_extractor_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_intent_resp))):
+        s1 = ra.extract_research_intent({"messages": messages, "turn": 0})
+
+    assert "research_intent" in s1
+    assert "topics" in s1
+
+    # --- generate_semantic_queries ---
+    mock_kw_resp = MagicMock()
+    mock_kw_resp.content = '["quantum error correction stabilizer codes", "fault tolerant quantum computation"]'
+    with patch.object(ra, "get_keyword_expander_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_kw_resp))):
+        s2 = ra.generate_semantic_queries({**s1})
+
+    assert "expanded_keywords" in s2
+    assert len(s2["expanded_keywords"]) >= 1
+
+    # --- normalize_queries ---
+    mock_q_resp = MagicMock()
+    mock_q_resp.content = '["quantum error correction stabilizer", "fault tolerance quantum codes"]'
+    with patch.object(ra, "get_query_generator_model", return_value=MagicMock(invoke=MagicMock(return_value=mock_q_resp))):
+        s3 = ra.normalize_queries({**s1, **s2, "max_searches": 5})
+
+    assert "arxiv_queries" in s3
+    assert len(s3["arxiv_queries"]) >= 1

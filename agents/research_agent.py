@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from functools import lru_cache
 from typing import Annotated, Literal
 
+import numpy as np
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from sentence_transformers import SentenceTransformer
 from langgraph.graph import END, MessagesState, StateGraph
 from langsmith import traceable
 from pydantic import Field
@@ -43,7 +46,9 @@ except ConfigError as _cfg_err:
 # State schema
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MAX_SEARCHES = 10
+_EMBED_SIMILARITY_THRESHOLD = 0.7
+_QUERY_COUNT = 50
+_RESULTS_PER_QUERY = 15
 
 # TODO: remove this constraint when ready to use all sources
 _ALLOWED_SOURCES: set[str] | None = {"arxiv"}  # set to None to allow all sources
@@ -89,10 +94,8 @@ class ResearchState(MessagesState, total=False):
         description="Human-readable explanation of why the agent was blocked.",
     )]
     max_searches: Annotated[int, Field(
-        default=_DEFAULT_MAX_SEARCHES,
+        default=_QUERY_COUNT,
         description="Maximum number of search queries to execute per run.",
-        ge=1,
-        le=10,
     )]
     date_filter: Annotated[dict, Field(
         default_factory=dict,
@@ -100,7 +103,11 @@ class ResearchState(MessagesState, total=False):
     )]
     topics: Annotated[list[str], Field(
         default_factory=list,
-        description="3–8 academic sub-topics extracted from the user query.",
+        description="Flat list of all phrases from research_intent (domains + methods + concepts).",
+    )]
+    research_intent: Annotated[dict, Field(
+        default_factory=dict,
+        description="Structured research intent with problem_domains, methods, related_concepts.",
     )]
     expanded_keywords: Annotated[list[str], Field(
         default_factory=list,
@@ -154,9 +161,13 @@ def get_topic_extractor_model() -> ChatOpenAI:
 def get_keyword_expander_model() -> ChatOpenAI:
     return _make_model(cfg.research_keyword_expander_model)
 
+
 @lru_cache(maxsize=1)
-def get_query_generator_model() -> ChatOpenAI:
-    return _make_model(cfg.research_query_generator_model)
+def get_embedding_model() -> SentenceTransformer:
+    """Embedding model for semantic similarity filtering."""
+    if cfg is None:
+        raise ConfigError("Agent config not loaded — check your environment variables.")
+    return SentenceTransformer(cfg.research_embedding_model)
 
 
 # ---------------------------------------------------------------------------
@@ -202,13 +213,13 @@ def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
             start = date_filter.get("start_date", "")
             end = date_filter.get("end_date", "")
             if start and end:
-                # arXiv timestamp format: YYYYMMDDHHMMSS
-                from_ts = start.replace("-", "") + "010000"
-                to_ts = end.replace("-", "") + "2359"
+                # arXiv timestamp format: YYYYMMDDHHMMSS (14 chars)
+                from_ts = start.replace("-", "") + "000000"
+                to_ts = end.replace("-", "") + "235959"
                 date_clause = f"AND+submittedDate:[{from_ts}+TO+{to_ts}]"
                 search_query = f"all:{query}+{date_clause}"
                 sort_by = "submittedDate"
-        url = f"https://export.arxiv.org/api/query?search_query={search_query}&max_results=3&sortBy={sort_by}"
+        url = f"https://export.arxiv.org/api/query?search_query={search_query}&max_results={_RESULTS_PER_QUERY}&sortBy={sort_by}"
         resp = httpx.get(url, timeout=15)
         resp.raise_for_status()
         # Parse atom XML minimally
@@ -216,7 +227,7 @@ def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
             r"<entry>(.*?)</entry>", resp.text, re.DOTALL
         )
         results = []
-        for entry in entries[:3]:
+        for entry in entries[:_RESULTS_PER_QUERY]:
             title_m = re.search(r"<title>(.*?)</title>", entry, re.DOTALL)
             summary_m = re.search(r"<summary>(.*?)</summary>", entry, re.DOTALL)
             link_m = re.search(r'<id>(.*?)</id>', entry, re.DOTALL)
@@ -324,6 +335,12 @@ def _parse_duckling_time(text: str) -> dict:
                 if start and end:
                     return {"start_date": start, "end_date": end}
 
+    # Duckling fallback: regex for year ranges like "2023 to 2026" or "2023-2026"
+    m = re.search(r"\b(20\d{2})\s*(?:to|-|through|–)\s*(20\d{2})\b", text)
+    if m:
+        start_year, end_year = m.group(1), m.group(2)
+        return {"start_date": f"{start_year}-01-01", "end_date": f"{end_year}-12-31"}
+
     return {}
 
 
@@ -383,8 +400,8 @@ def parse_dates(state: ResearchState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def extract_topics(state: ResearchState) -> dict:
-    """First planning node: detect new turn, reset per-turn state, extract academic topics."""
+def extract_research_intent(state: ResearchState) -> dict:
+    """Extract structured research intent from the user query."""
     messages = state.get("messages", [])
     human_msg_count = sum(1 for m in messages if isinstance(m, HumanMessage))
     current_turn = state.get("turn", 0)
@@ -400,6 +417,7 @@ def extract_topics(state: ResearchState) -> dict:
             "turn": human_msg_count,
             "topic": topic,
             "topics": [],
+            "research_intent": {},
             "expanded_keywords": [],
             "arxiv_queries": [],
             "search_plan": [],
@@ -416,136 +434,188 @@ def extract_topics(state: ResearchState) -> dict:
     prompt = (
         f"You are an academic research analyst.\n\n"
         f"User query: {topic}\n\n"
-        f"Extract 3 to 8 distinct academic research sub-topics or angles that together cover "
-        f"the scope of this query. Each topic should be a short noun phrase (3–6 words) "
-        f"suitable for academic literature search on arXiv.\n\n"
+        f"Extract structured research intent as a JSON object with three keys:\n"
+        f"- problem_domains: main scientific problems or subjects (2–5 word phrases)\n"
+        f"- methods: research techniques or approaches mentioned or implied\n"
+        f"- related_concepts:\
+        - Related concepts must remain within the same research problem or objective.\
+        - Do not introduce different tasks, applications, or problem types unrelated to the user query.\
+        - Related concepts may broaden terminology but must not change the underlying task being studied.\n\n"
         f"Rules:\n"
-        f"- Return ONLY a JSON array of strings, e.g. [\"topic one\", \"topic two\"]\n"
-        f"- No duplicates, no generic topics like \"overview\" or \"introduction\"\n"
-        f"- Do NOT include the query verbatim as a topic"
+        f"- Each value is a list of short phrases (2–5 words)\n"
+        f"- Avoid paper titles or overly specific phrases\n"
+        f"- Remain semantically aligned with the user query\n"
+        f"- Return ONLY valid JSON, e.g.:\n"
+        f'{{"problem_domains": ["quantum parameter estimation"], '
+        f'"methods": ["machine learning"], "related_concepts": ["quantum sensing"]}}'
     )
-    topics: list[str] = []
+
+    intent: dict = {}
     try:
         raw = get_topic_extractor_model().invoke([HumanMessage(content=prompt)]).content
         if not isinstance(raw, str):
             raw = str(raw)
-        match = re.search(r"\[.*?\]", raw, re.DOTALL)
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             parsed = json.loads(match.group())
-            topics = [t for t in parsed if isinstance(t, str) and t.strip()][:8]
+            intent = {
+                "problem_domains": [s for s in parsed.get("problem_domains", []) if isinstance(s, str) and s.strip()][:5],
+                "methods": [s for s in parsed.get("methods", []) if isinstance(s, str) and s.strip()][:5],
+                "related_concepts": [s for s in parsed.get("related_concepts", []) if isinstance(s, str) and s.strip()][:5],
+            }
     except Exception as exc:
         logger.warning("extract_topics LLM failed: %s", exc)
 
-    if not topics:
-        topics = [topic] if topic else []
-    logger.info("extract_topics: %d topics", len(topics))
-    return {**reset, "topics": topics}
+    if not intent:
+        intent = {"problem_domains": [topic] if topic else [], "methods": [], "related_concepts": []}
+
+    flat_topics = intent["problem_domains"] + intent["methods"] + intent["related_concepts"]
+    logger.info("extract_topics: %d intent phrases across 3 categories", len(flat_topics))
+    return {**reset, "research_intent": intent, "topics": flat_topics}
 
 
-def expand_keywords(state: ResearchState) -> dict:
-    """Expand extracted topics into a deduplicated set of search keywords (max 20)."""
-    topics = state.get("topics", [])
-    topics_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(topics))
-
-    prompt = (
-        f"You are a research librarian specializing in academic keyword expansion.\n\n"
-        f"Research topics:\n{topics_text}\n\n"
-        f"For each topic, generate related keywords, synonyms, and closely related concepts "
-        f"that would help find relevant papers on arXiv. Think about:\n"
-        f"- Technical synonyms\n"
-        f"- Related subtechniques or methods\n"
-        f"- Application domains\n\n"
-        f"Return ONLY a JSON array of keyword strings (max 20 total, deduplicated). "
-        f"Each keyword should be 1–5 words."
-    )
-    keywords: list[str] = []
-    try:
-        raw = get_keyword_expander_model().invoke([HumanMessage(content=prompt)]).content
-        if not isinstance(raw, str):
-            raw = str(raw)
-        match = re.search(r"\[.*?\]", raw, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group())
-            seen: dict[str, None] = {}
-            for k in parsed:
-                if isinstance(k, str) and k.strip() and k not in seen:
-                    seen[k] = None
-            keywords = list(seen)[:20]
-    except Exception as exc:
-        logger.warning("expand_keywords LLM failed: %s", exc)
-
-    if not keywords:
-        keywords = topics  # fallback: use topics as keywords
-    logger.info("expand_keywords: %d keywords", len(keywords))
-    return {"expanded_keywords": keywords}
+_FILLER_WORDS = {"for", "with", "using", "in", "the"}
 
 
-def generate_arxiv_queries(state: ResearchState) -> dict:
-    """Generate 5–max_searches bare arXiv keyword query strings from expanded_keywords."""
-    keywords = state.get("expanded_keywords", [])
-    max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
-    keywords_text = ", ".join(keywords)
+def generate_semantic_queries(state: ResearchState) -> dict:
+    """Generate broad keyword retrieval queries via combinatorial expansion of research intent.
 
-    prompt = (
-        f"You are an arXiv search expert.\n\n"
-        f"Available keywords: {keywords_text}\n\n"
-        f"Generate between 5 and {max_searches} arXiv search queries using these keywords.\n"
-        f"Each query should combine 2–4 keywords into a meaningful phrase targeting a different angle.\n\n"
-        f"Rules:\n"
-        f"- Return ONLY a JSON array of query strings\n"
-        f"- Do NOT add an 'all:' prefix — the search system adds it automatically\n"
-        f"- No duplicate keyword combinations\n\n"
-        f"Example: [\"transformer attention mechanism\", \"BERT language model fine-tuning\"]"
-    )
-    queries: list[str] = []
-    try:
-        raw = get_query_generator_model().invoke([HumanMessage(content=prompt)]).content
-        if not isinstance(raw, str):
-            raw = str(raw)
-        match = re.search(r"\[.*?\]", raw, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group())
-            queries = [q for q in parsed if isinstance(q, str) and q.strip()][:max_searches]
-    except Exception as exc:
-        logger.warning("generate_arxiv_queries LLM failed: %s", exc)
+    Produces ~QUERY_COUNT queries by expanding problem_domains × methods × concepts.
+    These queries are designed for high-recall keyword-based search (e.g., arXiv API).
+    """
+    intent: dict = state.get("research_intent", {})
+    topics_fallback = state.get("topics", [])
+    query_count = state.get("query_count", _QUERY_COUNT)
 
+    domains = intent.get("problem_domains", [])
+    methods = intent.get("methods", [])
+    concepts = intent.get("related_concepts", [])
+
+    if not domains and not methods:
+        domains = topics_fallback[:3]
+
+    candidates: list[str] = []
+
+    # domain × method
+    for d in domains:
+        for m in methods:
+            candidates.append(f"{d} {m}")
+
+    # domain × concept
+    for d in domains:
+        for c in concepts:
+            candidates.append(f"{d} {c}")
+
+    # domain × method × concept (trimmed to 6 words max)
+    for d in domains:
+        for m in methods:
+            for c in concepts:
+                raw = f"{d} {m} {c}"
+                words = [w for w in raw.split() if w not in _FILLER_WORDS]
+                candidates.append(" ".join(words[:6]))
+
+    # Fallback: bare domains
+    for d in domains:
+        candidates.append(d)
+
+    # Normalize: lowercase, remove filler words, deduplicate
+    seen: dict[str, None] = {}
+    for q in candidates:
+        words = [w.lower() for w in q.split() if w.lower() not in _FILLER_WORDS]
+        normalized = " ".join(words)
+        if normalized and len(words) >= 2 and normalized not in seen:
+            seen[normalized] = None
+
+    queries = list(seen)[:query_count]
+    logger.info("generate_semantic_queries: %d keyword queries", len(queries))
+    return {"expanded_keywords": queries}
+
+
+_STOPWORDS = {
+    "a", "an", "the", "and", "or", "of", "in", "on", "at", "to", "by",
+    "for", "with", "from", "via", "using", "based", "into", "about",
+}
+
+_PUNCT_RE = re.compile(r"[^\w\s]")
+
+
+def _clean_query(q: str) -> str:
+    """Lowercase, strip punctuation, remove stopwords, collapse whitespace."""
+    q = _PUNCT_RE.sub(" ", q.lower())
+    words = [w for w in q.split() if w and w not in _STOPWORDS]
+    return " ".join(words).strip()
+
+
+def _shares_domain(query: str, domains: list[str]) -> bool:
+    """True if any domain word appears in the query."""
+    domain_words = {w for d in domains for w in d.lower().split()}
+    query_words = set(query.split())
+    return bool(domain_words & query_words)
+
+
+def normalize_queries(state: ResearchState) -> dict:
+    return state # do not remove it is for debuging
+    """Normalize and deduplicate semantic queries into bare arXiv-compatible strings."""
+    queries = state.get("expanded_keywords", [])
+    intent: dict = state.get("research_intent", {})
+    domains = intent.get("problem_domains", [])
+    max_searches = state.get("max_searches", _QUERY_COUNT)
     if not queries:
-        queries = keywords[:max_searches] or [state.get("topic", "")]
-    logger.info("generate_arxiv_queries: %d queries", len(queries))
-    return {"arxiv_queries": queries}
+        queries = domains or [state.get("topic", "")]
+
+    cleaned: list[str] = []
+    for q in queries:
+        query = _clean_query(q)
+        if not query:
+            continue
+
+        # Ensure at least one domain term is present
+        if domains and not _shares_domain(query, domains):
+            query = f"{_clean_query(domains[0])} {query}"
+
+        cleaned.append(query)
+
+    # Exact deduplication only
+    seen: set[str] = set()
+    unique: list[str] = []
+
+    for q in cleaned:
+        if q not in seen:
+            seen.add(q)
+            unique.append(q)
+
+    logger.info("normalize_queries: %d → %d", len(queries), len(unique[:max_searches]))
+
+    return {"arxiv_queries": unique[:max_searches]}
 
 
 def apply_date_filter(state: ResearchState) -> dict:
-    """Assemble search_plan from arxiv_queries, embedding arXiv submittedDate clause when date_filter is set."""
+    """Assemble search_plan from arxiv_queries. Date filtering is applied in _arxiv_search via date_filter."""
     queries = state.get("arxiv_queries", [])
-    max_searches = state.get("max_searches", _DEFAULT_MAX_SEARCHES)
-    date_filter: dict = state.get("date_filter", {})
-
+    max_searches = state.get("max_searches", _QUERY_COUNT)
+    if not queries:
+        queries = state.get("expanded_keywords", [])
     if not queries:
         topic = state.get("topic", "")
         queries = [topic] if topic else []
 
     if not queries:
         logger.warning("apply_date_filter: no queries, blocking")
-        return {"search_plan": [], "blocked": True, "block_reason": "No search queries could be generated."}
+        return {
+            "search_plan": [],
+            "blocked": True,
+            "block_reason": "No search queries could be generated.",
+            "synthesis": "No sources found.",
+            "messages": [AIMessage(content="No sources found.")],
+        }
 
     queries = queries[:max_searches]
 
-    date_clause = ""
-    if date_filter:
-        start = date_filter.get("start_date", "")
-        end = date_filter.get("end_date", "")
-        if start and end:
-            from_ts = start.replace("-", "") + "0000"
-            to_ts = end.replace("-", "") + "2359"
-            date_clause = f"+AND+submittedDate:[{from_ts}+TO+{to_ts}]"
-            logger.info("apply_date_filter: embedding date clause %s", date_clause)
-
     search_plan = [
-        {"source": "arxiv", "query": q + date_clause}
+        {"source": "arxiv", "query": q}
         for q in queries
     ]
-    logger.info("apply_date_filter: %d search tasks (date_clause=%r)", len(search_plan), date_clause)
+    logger.info("apply_date_filter: %d search tasks", len(search_plan))
     return {"search_plan": search_plan}
 
 
@@ -631,80 +701,53 @@ def validate_date_range(state: ResearchState) -> dict:
 
     logger.info("validate_date_range: kept %d / %d results (%d removed)", len(kept), len(results), removed)
     if not kept:
-        logger.warning("validate_date_range: all results removed — keeping originals")
-        return {}
+        logger.warning("validate_date_range: all results removed by date filter")
+        return {"search_results": kept}
     return {"search_results": kept}
 
 
-def filter_results(state: ResearchState) -> dict:
-    """Use an LLM to drop search results that are not relevant to the topic."""
+
+
+def rank_results_by_similarity(state: ResearchState) -> dict:
+    """Filter search results by embedding cosine similarity to the user query."""
     topic = state.get("topic", "")
     results: list[dict] = state.get("search_results", [])
-    date_filter: dict = state.get("date_filter", {})
 
     if not results:
         return {}
 
-    # Format results for the filter prompt
-    lines: list[str] = []
-    for i, r in enumerate(results, 1):
-        lines.append(
-            f"[{i}] ({r.get('source', '?')}) {r.get('title', 'No title')}\n"
-            f"    {r.get('snippet', '')[:300]}"
-        )
-    results_text = "\n\n".join(lines)
-
-    date_constraint_text = ""
-    if date_filter:
-        start = date_filter.get("start_date", "")
-        end = date_filter.get("end_date", "")
-        if start and end and start == end:
-            date_constraint_text = (
-                f"\nDATE CONSTRAINT: Only keep results published on {start}. "
-                f"Reject any result that clearly belongs to a different date."
-            )
-        elif start and end:
-            date_constraint_text = (
-                f"\nDATE CONSTRAINT: Only keep results published between {start} and {end}. "
-                f"Reject any result that clearly falls outside this range."
-            )
-
-    filter_prompt = (
-        f"You are a research relevance filter.\n"
-        f"Topic: {topic}"
-        + (f"\n{date_constraint_text}" if date_constraint_text else "")
-        + f"\n\nBelow are {len(results)} search results. Return a JSON array of the 1-based indices "
-        f"of results that are clearly relevant to the topic"
-        + (" and satisfy the date constraint above" if date_constraint_text else "")
-        + ".\n"
-        f"Drop results that are off-topic, too generic, or clearly unrelated"
-        + (", or from the wrong time period" if date_constraint_text else "")
-        + ".\n"
-        f"Return ONLY the JSON array, e.g. [1, 3, 5].\n\n"
-        f"{results_text}"
-    )
-
-    logger.info("Filtering %d results for relevance to topic: %r", len(results), topic[:80])
     try:
-        raw = get_filter_model().invoke([HumanMessage(content=filter_prompt)]).content
-        if not isinstance(raw, str):
-            raw = str(raw)
-        match = re.search(r"\[.*?\]", raw, re.DOTALL)
-        if match:
-            indices: list[int] = json.loads(match.group())
-            # Keep only valid 1-based indices
-            filtered = [results[i - 1] for i in indices if isinstance(i, int) and 1 <= i <= len(results)]
-        else:
-            filtered = results
-        logger.info("Relevance filter: kept %d / %d results", len(filtered), len(results))
-        if not filtered:
-            logger.warning("Filter dropped all results — keeping originals")
-            filtered = results
+        embedder = get_embedding_model()
+        texts = [f"{r.get('title', '')} {r.get('snippet', '')}" for r in results]
+        query_emb = embedder.encode(topic, normalize_embeddings=True)
+        result_embs = embedder.encode(texts, normalize_embeddings=True)
     except Exception as exc:
-        logger.warning("Relevance filter failed (%s) — keeping all results", exc)
-        filtered = results
+        logger.warning("filter_results embedding failed (%s) — keeping all results", exc)
+        return {}
 
-    return {"search_results": filtered}
+    kept: list[dict] = []
+    seen_titles: set[str] = set()
+    for result, doc_emb in zip(results, result_embs):
+        sim = float(np.dot(query_emb, doc_emb))
+        title_key = result.get("title", "").lower().strip()
+        if sim >= _EMBED_SIMILARITY_THRESHOLD and title_key not in seen_titles:
+            kept.append(result)
+            seen_titles.add(title_key)
+        else:
+            logger.info("rank_results_by_similarity: dropping %r (sim=%.3f)", result.get("title", "")[:60], sim)
+
+    logger.info(
+        "filter_results: kept %d / %d results (threshold=%.2f)",
+        len(kept), len(results), _EMBED_SIMILARITY_THRESHOLD,
+    )
+    if not kept:
+        logger.warning("rank_results_by_similarity: all results dropped by similarity filter")
+        return {
+            "search_results": [],
+            "synthesis": "No sources found.",
+            "messages": [AIMessage(content="No sources found.")],
+        }
+    return {"search_results": kept}
 
 
 def synthesize_research(state: ResearchState) -> dict:
@@ -801,6 +844,15 @@ def route_after_apply_date_filter(
     return "execute_searches"
 
 
+def route_after_rank_results(
+    state: ResearchState,
+) -> Literal["synthesize", "__end__"]:
+    """Route after rank_results_by_similarity: end with message if no results remain."""
+    if not state.get("search_results"):
+        return "__end__"
+    return "synthesize"
+
+
 # ---------------------------------------------------------------------------
 # Graph assembly
 # ---------------------------------------------------------------------------
@@ -810,28 +862,32 @@ def build_graph() -> StateGraph:
     """Build and compile the LangGraph research agent graph."""
     graph = StateGraph(ResearchState)
     graph.add_node("parse_dates", parse_dates)
-    graph.add_node("extract_topics", extract_topics)
-    graph.add_node("expand_keywords", expand_keywords)
-    graph.add_node("generate_arxiv_queries", generate_arxiv_queries)
+    graph.add_node("extract_research_intent", extract_research_intent)
+    graph.add_node("generate_semantic_queries", generate_semantic_queries)
+    graph.add_node("normalize_queries", normalize_queries)
     graph.add_node("apply_date_filter", apply_date_filter)
     graph.add_node("execute_searches", execute_searches)
     graph.add_node("validate_date_range", validate_date_range)
-    graph.add_node("filter_results", filter_results)
+    graph.add_node("rank_results_by_similarity", rank_results_by_similarity)
     graph.add_node("synthesize", synthesize_research)
 
     graph.set_entry_point("parse_dates")
-    graph.add_edge("parse_dates", "extract_topics")
-    graph.add_edge("extract_topics", "expand_keywords")
-    graph.add_edge("expand_keywords", "generate_arxiv_queries")
-    graph.add_edge("generate_arxiv_queries", "apply_date_filter")
+    graph.add_edge("parse_dates", "extract_research_intent")
+    graph.add_edge("extract_research_intent", "generate_semantic_queries")
+    graph.add_edge("generate_semantic_queries", "normalize_queries")
+    graph.add_edge("normalize_queries", "apply_date_filter")
     graph.add_conditional_edges(
         "apply_date_filter",
         route_after_apply_date_filter,
         {"execute_searches": "execute_searches", "__end__": END},
     )
     graph.add_edge("execute_searches", "validate_date_range")
-    graph.add_edge("validate_date_range", "filter_results")
-    graph.add_edge("filter_results", "synthesize")
+    graph.add_edge("validate_date_range", "rank_results_by_similarity")
+    graph.add_conditional_edges(
+        "rank_results_by_similarity",
+        route_after_rank_results,
+        {"synthesize": "synthesize", "__end__": END},
+    )
     graph.add_edge("synthesize", END)
 
     return graph.compile()
@@ -850,28 +906,26 @@ app = build_graph()
     tags=["research", "plan-and-execute"],
     metadata={"agent_type": "research", "version": "1.0"},
 )
-def run_agent(topic: str, max_searches: int = _DEFAULT_MAX_SEARCHES) -> ResearchState:
+def run_agent(topic: str, query_count: int = _QUERY_COUNT) -> ResearchState:
     """Run the research agent on a topic.
 
     Args:
         topic: The research question or topic. Must be non-empty.
-        max_searches: Maximum number of search queries to run (1-10, default 5).
+        query_count: Number of search queries to generate and run (default: _QUERY_COUNT).
 
     Returns:
         Final ResearchState with synthesis, search_results, and metadata.
 
     Raises:
-        ValueError: If topic is empty or max_searches is out of range.
+        ValueError: If topic is empty.
     """
     if not topic or not topic.strip():
         raise ValueError("Topic must be a non-empty string")
-    if not 1 <= max_searches <= 10:
-        raise ValueError("max_searches must be between 1 and 10")
 
-    logger.info("Starting research agent: topic=%r max_searches=%d", topic[:80], max_searches)
+    logger.info("Starting research agent: topic=%r query_count=%d", topic[:80], query_count)
     return app.invoke({
         "topic": topic.strip(),
-        "max_searches": max_searches,
+        "max_searches": query_count,
         "messages": [HumanMessage(content=topic.strip())],
     })
 
@@ -887,16 +941,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the research agent on a topic.")
     parser.add_argument("topic", help="Research topic or question")
     parser.add_argument(
-        "--max-searches",
+        "--query-count",
         type=int,
-        default=_DEFAULT_MAX_SEARCHES,
+        default=_QUERY_COUNT,
         metavar="N",
-        help=f"Maximum number of search queries to run (1-10, default {_DEFAULT_MAX_SEARCHES})",
+        help=f"Number of search queries to run (default {_QUERY_COUNT})",
     )
     args = parser.parse_args()
 
     try:
-        result = run_agent(args.topic, max_searches=args.max_searches)
+        result = run_agent(args.topic, query_count=args.query_count)
         print(result.get("synthesis", "No synthesis produced."))
     except (ValueError, ConfigError) as e:
         print(f"Error: {e}", file=sys.stderr)

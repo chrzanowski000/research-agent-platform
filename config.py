@@ -64,6 +64,7 @@ class Config:
     research_topic_extractor_model: str = ""
     research_keyword_expander_model: str = ""
     research_query_generator_model: str = ""
+    research_embedding_model: str = "BAAI/bge-large-en-v1.5"
 
     @classmethod
     def from_env(cls) -> Config:
@@ -151,6 +152,10 @@ class Config:
                 "RESEARCH_QUERY_GENERATOR_MODEL", "RESEARCH_PLANNER_MODEL", "RESEARCH_MODEL",
                 fallback=global_model,
             ),
+            research_embedding_model=resolve_model(
+                "RESEARCH_EMBEDDING_MODEL",
+                fallback="BAAI/bge-large-en-v1.5",
+            ),
         )
 
     def log_models(self) -> None:
@@ -179,6 +184,7 @@ class Config:
             f"│   topic_extractor   : {self.research_topic_extractor_model}\n"
             f"│   keyword_expander  : {self.research_keyword_expander_model}\n"
             f"│   query_generator   : {self.research_query_generator_model}\n"
+            f"│   embedding         : {self.research_embedding_model}\n"
             "└────────────────────────────────────────────────────────────┘",
             file=sys.stderr,
             flush=True,
