@@ -1,10 +1,11 @@
-"""Research Agent: Plan-and-Execute deep research with web, arXiv, and GitHub search."""
+"""Research Agent: Plan-and-Execute deep research with web, Semantic Scholar, and GitHub search."""
 from __future__ import annotations
 
 import json
 import logging
 import os
 import re
+import time
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -47,14 +48,15 @@ except ConfigError as _cfg_err:
 # ---------------------------------------------------------------------------
 
 _EMBED_SIMILARITY_THRESHOLD = 0.7
-_QUERY_COUNT = 50
+_QUERY_COUNT = 20
 _RESULTS_PER_QUERY = 15
-_ARXIV_PAGE_SIZE = 50       # results per paginated request (date-filtered searches)
+_ARXIV_PAGE_SIZE = 10       # results per paginated request (date-filtered searches)
 _ARXIV_MAX_PAGES = 10       # max pages to fetch per date-filtered query
 _ARXIV_CANDIDATE_CAP = 200  # hard cap on candidate pool before truncation
+_S2_MAX_RESULTS = 100       # max results per Semantic Scholar request
 
 # TODO: remove this constraint when ready to use all sources
-_ALLOWED_SOURCES: set[str] | None = {"arxiv"}  # set to None to allow all sources
+_ALLOWED_SOURCES: set[str] | None = {"semantic_scholar"}  # set to None to allow all sources
 
 
 class ResearchState(MessagesState, total=False):
@@ -237,26 +239,29 @@ def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
         # Paginated high-recall path for date-filtered searches
         from_ts = start_date.replace("-", "") + "000000"
         to_ts = end_date.replace("-", "") + "235959"
-        search_query = f"all:{query}+AND+submittedDate:[{from_ts}+TO+{to_ts}]"
+        # Build URL manually — httpx params= would double-encode + and [] in arXiv query syntax
+        # arXiv expects spaces as +, colon unencoded: all:term1+term2+AND+submittedDate:[...]
+        query_terms = "+".join(query.split())
+        encoded_query = f"all:{query_terms}+AND+submittedDate:%5B{from_ts}+TO+{to_ts}%5D"
 
         candidates: list[dict] = []
         seen_urls: set[str] = set()
-
         for page in range(_ARXIV_MAX_PAGES):
             if len(candidates) >= _ARXIV_CANDIDATE_CAP:
                 break
             try:
-                resp = httpx.get(
-                    "https://export.arxiv.org/api/query",
-                    params={
-                        "search_query": search_query,
-                        "start": page * _ARXIV_PAGE_SIZE,
-                        "max_results": _ARXIV_PAGE_SIZE,
-                        "sortBy": "submittedDate",
-                    },
-                    timeout=15,
+                url = (
+                    f"https://export.arxiv.org/api/query"
+                    f"?search_query={encoded_query}"
+                    f"&start={page * _ARXIV_PAGE_SIZE}"
+                    f"&max_results={_ARXIV_PAGE_SIZE}"
+                    f"&sortBy=submittedDate"
                 )
+                resp = httpx.get(url, timeout=15)
                 resp.raise_for_status()
+                if "Rate exceeded" in resp.text:
+                    logger.warning("arXiv rate limit hit (page %d) for query %r", page, query[:60])
+                    break
             except Exception as exc:
                 logger.warning("arXiv paginated fetch failed (page %d): %s", page, exc)
                 break
@@ -285,6 +290,9 @@ def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
             timeout=15,
         )
         resp.raise_for_status()
+        if "Rate exceeded" in resp.text:
+            logger.warning("arXiv rate limit hit for query %r", query[:60])
+            return []
         entries = re.findall(r"<entry>(.*?)</entry>", resp.text, re.DOTALL)
         return _parse_arxiv_entries(entries[:_RESULTS_PER_QUERY])
     except Exception as exc:
@@ -325,12 +333,73 @@ def _github_search(query: str, date_filter: dict | None = None) -> list[dict]:
 
 
 
+def _semantic_scholar_search(query: str, date_filter: dict | None = None) -> list[dict]:
+    """Search Semantic Scholar for academic papers using the public Graph API.
+
+    Fetches up to _S2_MAX_RESULTS papers by relevance. When date_filter is provided,
+    results are filtered post-fetch by publicationDate.
+    """
+    start_date = (date_filter or {}).get("start_date", "")
+    end_date = (date_filter or {}).get("end_date", "")
+
+    params: dict = {
+        "query": query,
+        "limit": _RESULTS_PER_QUERY,
+        "fields": "title,abstract,externalIds,publicationDate,year",
+    }
+    # Use S2's native year-range filter so only papers with dates in range are returned
+    if date_filter and start_date and end_date:
+        start_year = start_date[:4]
+        end_year = end_date[:4]
+        params["year"] = f"{start_year}-{end_year}"
+        params["limit"] = _S2_MAX_RESULTS
+
+    try:
+        resp = httpx.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params=params,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Semantic Scholar search failed: %s", exc)
+        return []
+
+    results = []
+    for paper in data.get("data", []):
+        ext = paper.get("externalIds") or {}
+        arxiv_id = ext.get("ArXiv")
+        doi = ext.get("DOI")
+        if arxiv_id:
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+        elif doi:
+            url = f"https://doi.org/{doi}"
+        else:
+            url = ""
+
+        pub_date = paper.get("publicationDate") or ""
+
+        results.append({
+            "source": "semantic_scholar",
+            "title": paper.get("title", ""),
+            "url": url,
+            "snippet": (paper.get("abstract") or "")[:500],
+            "publication_date": pub_date,
+        })
+
+    logger.info("Semantic Scholar: %d results for query %r", len(results), query[:60])
+    return results[:_RESULTS_PER_QUERY]
+
+
 def _run_search(source: str, query: str, date_filter: dict | None = None) -> list[dict]:
     """Dispatch to the correct search backend."""
     if source == "web":
         return _tavily_search(query, date_filter)
     if source == "arxiv":
         return _arxiv_search(query, date_filter)
+    if source == "semantic_scholar":
+        return _semantic_scholar_search(query, date_filter)
     if source == "github":
         return _github_search(query, date_filter)
     logger.warning("Unknown search source: %s", source)
@@ -545,6 +614,14 @@ def generate_semantic_queries(state: ResearchState) -> dict:
 
     candidates: list[str] = []
 
+    # Bare terms first so they are never crowded out by cartesian products
+    for d in domains:
+        candidates.append(d)
+    for m in methods:
+        candidates.append(m)
+    for c in concepts:
+        candidates.append(c)
+
     # domain × method
     for d in domains:
         for m in methods:
@@ -562,14 +639,6 @@ def generate_semantic_queries(state: ResearchState) -> dict:
                 raw = f"{d} {m} {c}"
                 words = [w for w in raw.split() if w not in _FILLER_WORDS]
                 candidates.append(" ".join(words[:6]))
-
-    # Bare terms: each domain, method, concept as its own query
-    for d in domains:
-        candidates.append(d)
-    for m in methods:
-        candidates.append(m)
-    for c in concepts:
-        candidates.append(c)
 
     # Normalize: lowercase, remove filler words, deduplicate
     seen: dict[str, None] = {}
@@ -665,7 +734,7 @@ def apply_date_filter(state: ResearchState) -> dict:
     queries = queries[:max_searches]
 
     search_plan = [
-        {"source": "arxiv", "query": q}
+        {"source": "semantic_scholar", "query": q}
         for q in queries
     ]
     logger.info("apply_date_filter: %d search tasks", len(search_plan))
@@ -682,15 +751,29 @@ def execute_searches(state: ResearchState) -> dict:
     date_filter: dict = state.get("date_filter", {})
 
     all_results: list[dict] = []
-    for task in plan:
+    last_arxiv_req = 0.0
+    last_s2_req = 0.0
+    total = len(plan)
+    for i, task in enumerate(plan, 1):
         source = task.get("source", "web")
         query = task.get("query", "")
-        logger.info("Searching [%s]: %r (date_filter=%r)", source, query[:80], date_filter)
+        if source == "arxiv":
+            elapsed = time.time() - last_arxiv_req
+            if elapsed < 3.0:
+                time.sleep(3.0 - elapsed)
+            last_arxiv_req = time.time()
+        elif source == "semantic_scholar":
+            elapsed = time.time() - last_s2_req
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed)
+            last_s2_req = time.time()
+        logger.info("[%d/%d] Searching [%s]: %r", i, total, source, query[:80])
         try:
             results = _run_search(source, query, date_filter)
             all_results.extend(results)
+            logger.info("[%d/%d] Got %d results (total so far: %d)", i, total, len(results), len(all_results))
         except Exception as exc:
-            logger.error("Search failed [%s] %r: %s", source, query[:60], exc)
+            logger.error("[%d/%d] Search failed [%s] %r: %s", i, total, source, query[:60], exc)
 
     # Deduplicate by URL, preserving order
     seen: set[str] = set()
@@ -700,11 +783,11 @@ def execute_searches(state: ResearchState) -> dict:
 
 
 def validate_date_range(state: ResearchState) -> dict:
-    """Remove arXiv results whose submission date (from URL ID) falls outside date_filter range.
+    """Remove academic results outside the date_filter range.
 
-    arXiv paper IDs post-2007: YYMM.NNNNN — first 4 digits encode submission year+month.
-    Example: https://arxiv.org/abs/2401.12345v1 → 2024-01.
-    Non-arXiv results and results with unparseable IDs are kept unchanged.
+    - arXiv results: date extracted from URL ID (YYMM.NNNNN pattern).
+    - Semantic Scholar results: date taken from stored `publication_date` field (YYYY-MM-DD).
+    - Other sources are kept unchanged.
     If no date_filter is set, returns immediately without modifying results.
     """
     date_filter: dict = state.get("date_filter", {})
@@ -732,25 +815,55 @@ def validate_date_range(state: ResearchState) -> dict:
     kept: list[dict] = []
     removed = 0
     for result in results:
-        if result.get("source") != "arxiv":
-            kept.append(result)
-            continue
-        url = result.get("url", "")
-        m = _arxiv_id_re.search(url)
-        if not m:
-            kept.append(result)
-            continue
-        yymm = m.group(1)
-        paper_year = 2000 + int(yymm[:2])
-        paper_month = int(yymm[2:])
-        if (start_year, start_month) <= (paper_year, paper_month) <= (end_year, end_month):
-            kept.append(result)
+        source = result.get("source")
+
+        if source == "semantic_scholar":
+            pub_date = result.get("publication_date", "")
+            if not pub_date:
+                logger.info(
+                    "validate_date_range: removing S2 result with no publication_date: %s",
+                    result.get("url", "")[:60],
+                )
+                removed += 1
+                continue
+            try:
+                p_year, p_month = int(pub_date[:4]), int(pub_date[5:7])
+            except (ValueError, IndexError):
+                logger.info(
+                    "validate_date_range: removing S2 result with unparseable publication_date %r: %s",
+                    pub_date, result.get("url", "")[:60],
+                )
+                removed += 1
+                continue
+            if (start_year, start_month) <= (p_year, p_month) <= (end_year, end_month):
+                kept.append(result)
+            else:
+                logger.info(
+                    "validate_date_range: removing out-of-range S2 result %s (%04d-%02d outside %s–%s)",
+                    result.get("url", "")[:60], p_year, p_month, start, end,
+                )
+                removed += 1
+
+        elif source == "arxiv":
+            url = result.get("url", "")
+            m = _arxiv_id_re.search(url)
+            if not m:
+                kept.append(result)
+                continue
+            yymm = m.group(1)
+            paper_year = 2000 + int(yymm[:2])
+            paper_month = int(yymm[2:])
+            if (start_year, start_month) <= (paper_year, paper_month) <= (end_year, end_month):
+                kept.append(result)
+            else:
+                logger.info(
+                    "validate_date_range: removing out-of-range result %s (%04d-%02d outside %s–%s)",
+                    url[:60], paper_year, paper_month, start, end,
+                )
+                removed += 1
+
         else:
-            logger.info(
-                "validate_date_range: removing out-of-range result %s (%04d-%02d outside %s–%s)",
-                url[:60], paper_year, paper_month, start, end,
-            )
-            removed += 1
+            kept.append(result)
 
     logger.info("validate_date_range: kept %d / %d results (%d removed)", len(kept), len(results), removed)
     if not kept:
