@@ -49,6 +49,9 @@ except ConfigError as _cfg_err:
 _EMBED_SIMILARITY_THRESHOLD = 0.7
 _QUERY_COUNT = 50
 _RESULTS_PER_QUERY = 15
+_ARXIV_PAGE_SIZE = 50       # results per paginated request (date-filtered searches)
+_ARXIV_MAX_PAGES = 10       # max pages to fetch per date-filtered query
+_ARXIV_CANDIDATE_CAP = 200  # hard cap on candidate pool before truncation
 
 # TODO: remove this constraint when ready to use all sources
 _ALLOWED_SOURCES: set[str] | None = {"arxiv"}  # set to None to allow all sources
@@ -204,40 +207,86 @@ def _tavily_search(query: str, date_filter: dict | None = None) -> list[dict]:
     return results
 
 
+def _parse_arxiv_entries(entries: list[str]) -> list[dict]:
+    """Parse a list of raw arXiv Atom <entry> strings into result dicts."""
+    results = []
+    for entry in entries:
+        title_m = re.search(r"<title>(.*?)</title>", entry, re.DOTALL)
+        summary_m = re.search(r"<summary>(.*?)</summary>", entry, re.DOTALL)
+        link_m = re.search(r"<id>(.*?)</id>", entry, re.DOTALL)
+        results.append({
+            "source": "arxiv",
+            "title": title_m.group(1).strip() if title_m else "",
+            "url": link_m.group(1).strip() if link_m else "",
+            "snippet": summary_m.group(1).strip()[:500] if summary_m else "",
+        })
+    return results
+
+
 def _arxiv_search(query: str, date_filter: dict | None = None) -> list[dict]:
-    """Search arXiv for academic papers using the public API."""
+    """Search arXiv for academic papers using the public API.
+
+    Without date_filter: single relevance-sorted request.
+    With date_filter: paginated submission-date traversal to build a larger
+    candidate pool, then truncated to _RESULTS_PER_QUERY.
+    """
+    start_date = (date_filter or {}).get("start_date", "")
+    end_date = (date_filter or {}).get("end_date", "")
+
+    if date_filter and start_date and end_date:
+        # Paginated high-recall path for date-filtered searches
+        from_ts = start_date.replace("-", "") + "000000"
+        to_ts = end_date.replace("-", "") + "235959"
+        search_query = f"all:{query}+AND+submittedDate:[{from_ts}+TO+{to_ts}]"
+
+        candidates: list[dict] = []
+        seen_urls: set[str] = set()
+
+        for page in range(_ARXIV_MAX_PAGES):
+            if len(candidates) >= _ARXIV_CANDIDATE_CAP:
+                break
+            try:
+                resp = httpx.get(
+                    "https://export.arxiv.org/api/query",
+                    params={
+                        "search_query": search_query,
+                        "start": page * _ARXIV_PAGE_SIZE,
+                        "max_results": _ARXIV_PAGE_SIZE,
+                        "sortBy": "submittedDate",
+                    },
+                    timeout=15,
+                )
+                resp.raise_for_status()
+            except Exception as exc:
+                logger.warning("arXiv paginated fetch failed (page %d): %s", page, exc)
+                break
+
+            entries = re.findall(r"<entry>(.*?)</entry>", resp.text, re.DOTALL)
+            if not entries:
+                break
+
+            for item in _parse_arxiv_entries(entries):
+                if item["url"] not in seen_urls:
+                    seen_urls.add(item["url"])
+                    candidates.append(item)
+
+        logger.info("arXiv paginated: %d candidates for query %r", len(candidates), query[:60])
+        return candidates[:_RESULTS_PER_QUERY]
+
+    # Single relevance-sorted request (no date filter)
     try:
-        search_query = f"all:{query}"
-        sort_by = "relevance"
-        if date_filter:
-            start = date_filter.get("start_date", "")
-            end = date_filter.get("end_date", "")
-            if start and end:
-                # arXiv timestamp format: YYYYMMDDHHMMSS (14 chars)
-                from_ts = start.replace("-", "") + "000000"
-                to_ts = end.replace("-", "") + "235959"
-                date_clause = f"AND+submittedDate:[{from_ts}+TO+{to_ts}]"
-                search_query = f"all:{query}+{date_clause}"
-                sort_by = "submittedDate"
-        url = f"https://export.arxiv.org/api/query?search_query={search_query}&max_results={_RESULTS_PER_QUERY}&sortBy={sort_by}"
-        resp = httpx.get(url, timeout=15)
-        resp.raise_for_status()
-        # Parse atom XML minimally
-        entries = re.findall(
-            r"<entry>(.*?)</entry>", resp.text, re.DOTALL
+        resp = httpx.get(
+            "https://export.arxiv.org/api/query",
+            params={
+                "search_query": f"all:{query}",
+                "max_results": _RESULTS_PER_QUERY,
+                "sortBy": "relevance",
+            },
+            timeout=15,
         )
-        results = []
-        for entry in entries[:_RESULTS_PER_QUERY]:
-            title_m = re.search(r"<title>(.*?)</title>", entry, re.DOTALL)
-            summary_m = re.search(r"<summary>(.*?)</summary>", entry, re.DOTALL)
-            link_m = re.search(r'<id>(.*?)</id>', entry, re.DOTALL)
-            results.append({
-                "source": "arxiv",
-                "title": title_m.group(1).strip() if title_m else "",
-                "url": link_m.group(1).strip() if link_m else "",
-                "snippet": summary_m.group(1).strip()[:500] if summary_m else "",
-            })
-        return results
+        resp.raise_for_status()
+        entries = re.findall(r"<entry>(.*?)</entry>", resp.text, re.DOTALL)
+        return _parse_arxiv_entries(entries[:_RESULTS_PER_QUERY])
     except Exception as exc:
         logger.warning("arXiv search failed: %s", exc)
         return []

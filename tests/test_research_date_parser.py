@@ -6,6 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Stub heavy optional deps before importing agent
+sys.modules.setdefault("sentence_transformers", MagicMock())
+sys.modules.setdefault("numpy", MagicMock())
+
 # Stub config before importing agent
 _mock_cfg = MagicMock()
 _mock_cfg.duckling_url = "http://localhost:8000"
@@ -402,3 +406,101 @@ def test_node_pipeline_state_propagation():
 
     assert "arxiv_queries" in s3
     assert len(s3["arxiv_queries"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# _arxiv_search pagination
+# ---------------------------------------------------------------------------
+
+_ENTRY_TPL = """
+<entry>
+  <title>Paper {n}</title>
+  <summary>Summary of paper {n}.</summary>
+  <id>https://arxiv.org/abs/2401.0000{n}</id>
+</entry>
+"""
+
+def _make_feed(*ns):
+    entries = "".join(_ENTRY_TPL.format(n=n) for n in ns)
+    return f"<feed>{entries}</feed>"
+
+
+def test_arxiv_search_paginates_with_date_filter(monkeypatch):
+    """With date_filter, _arxiv_search should paginate and stop on empty page."""
+    responses = [_make_feed(1, 2), "<feed></feed>"]
+    call_count = {"n": 0}
+
+    def fake_get(url, params=None, timeout=None):
+        idx = call_count["n"]
+        call_count["n"] += 1
+        mock = MagicMock()
+        mock.raise_for_status = lambda: None
+        mock.text = responses[idx] if idx < len(responses) else "<feed></feed>"
+        return mock
+
+    monkeypatch.setattr(ra.httpx, "get", fake_get)
+
+    results = ra._arxiv_search("quantum sensing", {"start_date": "2023-01-01", "end_date": "2026-12-31"})
+
+    assert call_count["n"] == 2           # stopped after empty page
+    assert len(results) == 2
+    assert all(r["source"] == "arxiv" for r in results)
+    assert results[0]["title"] == "Paper 1"
+
+
+def test_arxiv_search_deduplicates_across_pages(monkeypatch):
+    """Duplicate URLs across pages should be collapsed."""
+    page = _make_feed(1, 2)
+    responses = [page, page, "<feed></feed>"]
+    call_count = {"n": 0}
+
+    def fake_get(url, params=None, timeout=None):
+        idx = call_count["n"]
+        call_count["n"] += 1
+        mock = MagicMock()
+        mock.raise_for_status = lambda: None
+        mock.text = responses[idx] if idx < len(responses) else "<feed></feed>"
+        return mock
+
+    monkeypatch.setattr(ra.httpx, "get", fake_get)
+
+    results = ra._arxiv_search("quantum sensing", {"start_date": "2023-01-01", "end_date": "2026-12-31"})
+    urls = [r["url"] for r in results]
+    assert len(urls) == len(set(urls))    # no duplicates
+
+
+def test_arxiv_search_no_date_filter_single_call(monkeypatch):
+    """Without date_filter, exactly one request should be made."""
+    call_count = {"n": 0}
+
+    def fake_get(url, params=None, timeout=None):
+        call_count["n"] += 1
+        mock = MagicMock()
+        mock.raise_for_status = lambda: None
+        mock.text = _make_feed(1)
+        return mock
+
+    monkeypatch.setattr(ra.httpx, "get", fake_get)
+
+    results = ra._arxiv_search("quantum sensing")
+    assert call_count["n"] == 1
+    assert results[0]["source"] == "arxiv"
+
+
+def test_arxiv_search_partial_failure_returns_collected(monkeypatch):
+    """If a page fetch fails mid-way, return whatever was already collected."""
+    call_count = {"n": 0}
+
+    def fake_get(url, params=None, timeout=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            mock = MagicMock()
+            mock.raise_for_status = lambda: None
+            mock.text = _make_feed(1, 2)
+            return mock
+        raise Exception("transient error")
+
+    monkeypatch.setattr(ra.httpx, "get", fake_get)
+
+    results = ra._arxiv_search("quantum sensing", {"start_date": "2023-01-01", "end_date": "2026-12-31"})
+    assert len(results) == 2   # collected before failure
