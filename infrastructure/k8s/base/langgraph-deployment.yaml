@@ -1,0 +1,77 @@
+# infrastructure/k8s/base/langgraph-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langgraph-api
+  template:
+    metadata:
+      labels:
+        app: langgraph-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2024"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: langgraph-api
+          image: agents/langgraph-api:latest
+          ports:
+            - containerPort: 2024
+          envFrom:
+            - configMapRef:
+                name: app-config
+          # NOTE: Secrets declared individually (not envFrom) because
+          # POSTGRES_PASSWORD must appear before DATABASE_URL for K8s $(VAR) substitution.
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgres:5432/research"
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: OPENROUTER_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: TAVILY_API_KEY
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /ok
+              port: 2024
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ok
+              port: 2024
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          emptyDir: {}
