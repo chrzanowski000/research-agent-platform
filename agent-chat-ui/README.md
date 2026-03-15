@@ -1,261 +1,301 @@
 # Agent Chat UI
 
-Agent Chat UI is a Next.js application which enables chatting with any LangGraph server with a `messages` key through a chat interface.
-
-> [!NOTE]
-> 🎥 Watch the video setup guide [here](https://youtu.be/lInrwVnZ83o).
-
-## Docker Build & Startup
-
-The Agent Chat UI ships with a `Dockerfile` and is included in the project's `docker-compose.yml`. Use Docker when you want a self-contained, reproducible environment without installing Node/pnpm locally.
-
-### Quick start (via docker-compose from project root)
-
-Run the full stack (backend agent + UI + duckling) from the **project root**:
-
-```bash
-docker-compose up
-```
-
-The UI will be available at `http://localhost:3000`.
-
-### Build the image manually
-
-From inside the `agent-chat-ui/` directory:
-
-```bash
-docker build -t agent-chat-ui .
-```
-
-Run the container:
-
-```bash
-docker run -p 3000:3000 \
-  -e NEXT_PUBLIC_API_URL=http://localhost:2024 \
-  -e NEXT_PUBLIC_ASSISTANT_ID=self_reflection_agent \
-  agent-chat-ui
-```
-
-### Complete rebuild (no cache)
-
-Use this when you want to force a fresh install of all dependencies (e.g. after `pnpm-lock.yaml` changes or node_modules issues):
-
-```bash
-# Rebuild a single service
-docker-compose build --no-cache ui
-
-# Then start it
-docker-compose up ui
-```
-
-Or rebuild the entire stack from scratch:
-
-```bash
-docker-compose down --volumes --remove-orphans
-docker-compose build --no-cache
-docker-compose up
-```
-
-### Rebuild after code changes
-
-By default `docker-compose up` does **not** rebuild images. To pick up local code changes:
-
-```bash
-docker-compose up --build ui
-```
-
-To rebuild all services:
-
-```bash
-docker-compose up --build
-```
-
-### Environment variables in Docker
-
-Set variables in a `.env` file at the project root (next to `docker-compose.yml`). The compose file already wires the key variables for the UI service:
-
-| Variable | Default | Description |
-|---|---|---|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:2024` | LangGraph backend URL (client-side) |
-| `NEXT_PUBLIC_ASSISTANT_ID` | `self_reflection_agent` | Graph/assistant ID |
-| `LANGGRAPH_API_URL` | `http://agent:2024` | Internal service-to-service URL |
-
-> [!NOTE]
-> `LANGGRAPH_API_URL` uses the Docker internal hostname `agent` for service-to-service communication. `NEXT_PUBLIC_API_URL` uses `localhost:2024` because it's resolved by the browser.
+Agent Chat UI is a Next.js 15 application that provides a chat interface for interacting with LangGraph agents. It is pre-configured to work with the **Research Agent** — a 10-node plan-and-execute pipeline that retrieves and synthesizes academic papers from Semantic Scholar.
 
 ---
 
-## Local Setup (without Docker)
+## Architecture Overview
 
-> [!TIP]
-> Don't want to run the app locally? Use the deployed site here: [agentchat.vercel.app](https://agentchat.vercel.app)!
-
-First, clone the repository, or run the [`npx` command](https://www.npmjs.com/package/create-agent-chat-app):
-
-```bash
-npx create-agent-chat-app
+```
+┌──────────────────────────────────────────────────┐
+│         Browser (Next.js 15 Chat UI)             │
+│              http://localhost:3000               │
+└────────────────────┬─────────────────────────────┘
+                     │ HTTP  (NEXT_PUBLIC_API_URL)
+                     ▼
+┌──────────────────────────────────────────────────┐
+│           LangGraph API Backend                  │
+│              http://localhost:2024               │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │          Research Agent (default)          │  │
+│  │  parse_dates → extract_intent →           │  │
+│  │  generate_queries → normalize →           │  │
+│  │  apply_date_filter → execute_searches →   │  │
+│  │  validate_date_range →                    │  │
+│  │  rank_by_similarity → synthesize →        │  │
+│  │  persist_run                              │  │
+│  └────────────────────────────────────────────┘  │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │    Self-Reflection Agents (extras)         │  │
+│  │  self_reflection_agent (v1)               │  │
+│  │  self_reflection_agent_v2 (v2)            │  │
+│  └────────────────────────────────────────────┘  │
+└──────┬──────────┬──────────────┬─────────────────┘
+       │          │              │
+       ▼          ▼              ▼
+┌──────────┐ ┌──────────┐ ┌────────────────────────┐
+│ Duckling │ │ Postgres │ │ Research Persistence   │
+│ :8000    │ │ :5432    │ │ API  :8001             │
+│          │ │          │ │                        │
+│ Date/time│ │ Research │ │ GET /research/queries  │
+│ parsing  │ │ run      │ │ GET /research/runs/:id │
+│          │ │ storage  │ │ DELETE /research/...   │
+└──────────┘ └──────────┘ └────────────────────────┘
 ```
 
-or
+**External APIs used by the Research Agent:**
+- **OpenRouter** — LLM calls for all pipeline nodes (intent extraction, query generation, synthesis)
+- **Semantic Scholar Graph API** — Academic paper search (primary source)
+- **Duckling** — Natural language date parsing (Docker service)
+- **BAAI/bge-large-en-v1.5** — Local embedding model for cosine-similarity ranking (no API key needed)
+
+---
+
+## Research Agent Pipeline
+
+The Research Agent is the primary agent in this system. It takes a natural-language research question and produces a structured synthesis of relevant academic papers.
+
+### Nodes (in order)
+
+| # | Node | What it does |
+|---|------|-------------|
+| 1 | `parse_dates` | Calls Duckling to extract `start_date` / `end_date` from the query (e.g. "papers from 2022 to 2024") |
+| 2 | `extract_research_intent` | LLM extracts structured intent: `problem_domains`, `methods`, `related_concepts` (3–5 phrases each) |
+| 3 | `generate_semantic_queries` | Generates semantic search queries via combinatorial expansion of intent components |
+| 4 | `normalize_queries` | Deduplicates and strips queries down to bare keyword strings |
+| 5 | `apply_date_filter` | Assembles the search plan, embedding the date constraint into each task |
+| 6 | `execute_searches` | Runs queries against Semantic Scholar (1 s delay per request); deduplicates by URL |
+| 7 | `validate_date_range` | Removes any retrieved result outside the requested date window |
+| 8 | `rank_results_by_similarity` | Runs local `BAAI/bge-large-en-v1.5` embeddings; keeps results above cosine similarity 0.1; deduplicates by title |
+| 9 | `synthesize` | LLM produces a structured brief: **Summary / Key Findings / Sources** |
+| 10 | `persist_run` | *(optional)* Saves query, run metadata, sources, and disk artifacts to PostgreSQL when `PERSIST_RUNS=true` |
+
+### Key constants
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `SIMILARITY_THRESHOLD` | `0.1` | Minimum cosine similarity to keep a result |
+| `QUERY_COUNT` | `5` | Number of search queries generated per run |
+| `RESULTS_PER_QUERY` | `10` | Results fetched per individual search |
+| `S2_DATE_FETCH_LIMIT` | `10` | Pre-filter fetch limit from Semantic Scholar |
+
+---
+
+## Docker Setup (Recommended)
+
+### Quick Start
+
+Run the entire stack from the **project root**:
 
 ```bash
-git clone https://github.com/langchain-ai/agent-chat-ui.git
+# With 1Password (no secrets on disk)
+op run --env-file=.env_tpl -- docker compose up --build --remove-orphans
 
+# Or with manually exported variables
+export OPENROUTER_API_KEY="your_key"
+export TAVILY_API_KEY="your_key"
+export LANGSMITH_API_KEY="your_key"   # optional
+export POSTGRES_PASSWORD="your_password"
+docker compose up --build --remove-orphans
+```
+
+### Services
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Chat UI | http://localhost:3000 | Next.js frontend |
+| LangGraph API | http://localhost:2024 | Agent execution backend |
+| Research Persistence API | http://localhost:8001 | Browse/delete persisted research runs |
+| Duckling | http://localhost:8000 | Date parser (used by Research Agent) |
+| PostgreSQL | localhost:5432 | Research run persistence |
+| LangSmith Studio | https://smith.langchain.com/studio/?baseUrl=http://localhost:2024 | Trace & debug agents |
+
+### Rebuild After Code Changes
+
+```bash
+# Rebuild only the UI service
+docker compose up --build ui
+
+# Rebuild everything
+docker compose up --build
+
+# Full clean rebuild (e.g. after lockfile changes)
+docker compose down --volumes --remove-orphans
+docker compose build --no-cache
+docker compose up
+```
+
+### View Logs
+
+```bash
+docker compose logs -f           # all services
+docker compose logs -f ui        # chat frontend
+docker compose logs -f agent     # LangGraph backend
+docker compose logs -f research-persistence-api
+docker compose logs -f duckling
+```
+
+---
+
+## Local Setup (Without Docker)
+
+### 1. Install Node dependencies
+
+```bash
 cd agent-chat-ui
-```
-
-Install dependencies:
-
-```bash
 pnpm install
 ```
 
-Run the app:
+### 2. Configure environment
+
+Copy the example env file and fill in the values:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+# URL of the running LangGraph API backend
+NEXT_PUBLIC_API_URL=http://localhost:2024
+
+# Which agent to use (research_agent is the default/recommended)
+NEXT_PUBLIC_ASSISTANT_ID=research_agent
+
+# Internal service-to-service URL (Docker only — not used in local dev)
+LANGGRAPH_API_URL=http://agent:2024
+
+# URL of the Research Persistence API (used by /runs page)
+RESEARCH_PERSISTENCE_API_URL=http://localhost:8001
+```
+
+### 3. Start the backend first
+
+The UI requires the LangGraph backend to be running. Start it with Docker or locally:
+
+```bash
+# Easiest: run just the agent + duckling via Docker
+docker compose up agent duckling
+```
+
+### 4. Run the UI
 
 ```bash
 pnpm dev
 ```
 
-The app will be available at `http://localhost:3000`.
+Open http://localhost:3000.
 
-## Usage
-
-Once the app is running (or if using the deployed site), you'll be prompted to enter:
-
-- **Deployment URL**: The URL of the LangGraph server you want to chat with. This can be a production or development URL.
-- **Assistant/Graph ID**: The name of the graph, or ID of the assistant to use when fetching, and submitting runs via the chat interface.
-- **LangSmith API Key**: (only required for connecting to deployed LangGraph servers) Your LangSmith API key to use when authenticating requests sent to LangGraph servers.
-
-After entering these values, click `Continue`. You'll then be redirected to a chat interface where you can start chatting with your LangGraph server.
+---
 
 ## Environment Variables
 
-You can bypass the initial setup form by setting the following environment variables:
+### Frontend Variables
 
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:2024
-NEXT_PUBLIC_ASSISTANT_ID=agent
-```
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:2024` | Yes | URL of the LangGraph backend, resolved by the browser |
+| `NEXT_PUBLIC_ASSISTANT_ID` | `self_reflection_agent` | Yes | Graph/assistant ID to use (set to `research_agent` for the main agent) |
+| `LANGGRAPH_API_URL` | `http://agent:2024` | Docker only | Internal service-to-service URL (uses Docker hostname `agent`) |
+| `RESEARCH_PERSISTENCE_API_URL` | `http://research-persistence-api:8001` | No | URL for the research persistence API (enables `/runs` page) |
 
-> [!TIP]
-> If you want to connect to a production LangGraph server, read the [Going to Production](#going-to-production) section.
+> **Note:** `NEXT_PUBLIC_*` variables are embedded into the browser bundle at build time. Never put secrets in `NEXT_PUBLIC_*` variables.
 
-To use these variables:
+### Backend Variables (used by LangGraph agent service)
 
-1. Copy the `.env.example` file to a new file named `.env`
-2. Fill in the values in the `.env` file
-3. Restart the application
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `OPENROUTER_API_KEY` | — | **Yes** | OpenRouter API key for all LLM calls |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | No | OpenRouter endpoint |
+| `TAVILY_API_KEY` | — | No | Tavily API key (used by self-reflection agents for web search) |
+| `LANGSMITH_API_KEY` | — | No | LangSmith key for tracing |
+| `LANGSMITH_TRACING` | `true` | No | Enable/disable LangSmith tracing |
+| `LANGSMITH_PROJECT` | `self-reflection-agent` | No | LangSmith project name |
+| `MODEL_NAME` | `nvidia/nemotron-3-nano-30b-a3b:free` | No | Global default model (OpenRouter model string) |
+| `PERSIST_RUNS` | `false` | No | Set to `true` to save research runs to PostgreSQL |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/research` | If `PERSIST_RUNS=true` | PostgreSQL connection string |
+| `POSTGRES_PASSWORD` | — | Docker only | PostgreSQL superuser password |
+| `DUCKLING_URL` | `http://localhost:8000` | No | Duckling date parser endpoint |
+| `USE_MOCK_S2` | `false` | No | Use mock Semantic Scholar results (for testing) |
+| `LOG_MODELS` | `false` | No | Print active model names on agent startup |
 
-When these environment variables are set, the application will use them instead of showing the setup form.
+### Per-Node Model Overrides (Research Agent)
+
+The Research Agent supports fine-grained model selection. Priority order (highest → lowest):
+
+1. **Node-level** (e.g. `RESEARCH_PLANNER_MODEL`)
+2. **Agent-level** (e.g. `RESEARCH_MODEL`)
+3. **Global fallback** (`MODEL_NAME`)
+
+| Variable | Node it applies to |
+|----------|-------------------|
+| `RESEARCH_MODEL` | All Research Agent nodes (agent-level override) |
+| `RESEARCH_PLANNER_MODEL` | `extract_research_intent` |
+| `RESEARCH_SYNTHESIZER_MODEL` | `synthesize` |
+| `RESEARCH_FILTER_MODEL` | `normalize_queries` |
+| `RESEARCH_TOPIC_EXTRACTOR_MODEL` | `extract_research_intent` |
+| `RESEARCH_KEYWORD_EXPANDER_MODEL` | `generate_semantic_queries` |
+| `RESEARCH_QUERY_GENERATOR_MODEL` | `generate_semantic_queries` |
+| `RESEARCH_EMBEDDING_MODEL` | `rank_results_by_similarity` (default: `BAAI/bge-large-en-v1.5`) |
+
+---
 
 ## Hiding Messages in the Chat
 
-You can control the visibility of messages within the Agent Chat UI in two main ways:
+### Prevent Live Streaming
 
-**1. Prevent Live Streaming:**
-
-To stop messages from being displayed _as they stream_ from an LLM call, add the `langsmith:nostream` tag to the chat model's configuration. The UI normally uses `on_chat_model_stream` events to render streaming messages; this tag prevents those events from being emitted for the tagged model.
-
-_Python Example:_
+To stop a message from appearing while it streams, add the `langsmith:nostream` tag to the model:
 
 ```python
 from langchain_anthropic import ChatAnthropic
 
-# Add tags via the .with_config method
-model = ChatAnthropic().with_config(
-    config={"tags": ["langsmith:nostream"]}
-)
+model = ChatAnthropic().with_config(config={"tags": ["langsmith:nostream"]})
 ```
 
-_TypeScript Example:_
+The message will still appear once the LLM call finishes, if it was saved to graph state.
 
-```typescript
-import { ChatAnthropic } from "@langchain/anthropic";
+### Hide Messages Permanently
 
-const model = new ChatAnthropic()
-  // Add tags via the .withConfig method
-  .withConfig({ tags: ["langsmith:nostream"] });
-```
-
-**Note:** Even if streaming is hidden this way, the message will still appear after the LLM call completes if it's saved to the graph's state without further modification.
-
-**2. Hide Messages Permanently:**
-
-To ensure a message is _never_ displayed in the chat UI (neither during streaming nor after being saved to state), prefix its `id` field with `do-not-render-` _before_ adding it to the graph's state, along with adding the `langsmith:do-not-render` tag to the chat model's configuration. The UI explicitly filters out any message whose `id` starts with this prefix.
-
-_Python Example:_
+To completely hide a message from the UI, prefix its `id` with `do-not-render-` before saving to state:
 
 ```python
 result = model.invoke([messages])
-# Prefix the ID before saving to state
 result.id = f"do-not-render-{result.id}"
 return {"messages": [result]}
 ```
 
-_TypeScript Example:_
+The UI filters out any message whose `id` starts with `do-not-render-`.
 
-```typescript
-const result = await model.invoke([messages]);
-// Prefix the ID before saving to state
-result.id = `do-not-render-${result.id}`;
-return { messages: [result] };
-```
-
-This approach guarantees the message remains completely hidden from the user interface.
+---
 
 ## Rendering Artifacts
 
-The Agent Chat UI supports rendering artifacts in the chat. Artifacts are rendered in a side panel to the right of the chat. To render an artifact, you can obtain the artifact context from the `thread.meta.artifact` field. Here's a sample utility hook for obtaining the artifact context:
+The chat UI supports rendering content in a side panel via the artifact system. Obtain the artifact context from `thread.meta.artifact`:
 
 ```tsx
 export function useArtifact<TContext = Record<string, unknown>>() {
-  type Component = (props: {
-    children: React.ReactNode;
-    title?: React.ReactNode;
-  }) => React.ReactNode;
-
-  type Context = TContext | undefined;
-
-  type Bag = {
-    open: boolean;
-    setOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
-
-    context: Context;
-    setContext: (value: Context | ((prev: Context) => Context)) => void;
-  };
-
   const thread = useStreamContext<
     { messages: Message[]; ui: UIMessage[] },
     { MetaType: { artifact: [Component, Bag] } }
   >();
-
   return thread.meta?.artifact;
 }
 ```
 
-After which you can render additional content using the `Artifact` component from the `useArtifact` hook:
+Then render content using the `Artifact` component:
 
 ```tsx
-import { useArtifact } from "../utils/use-artifact";
-import { LoaderIcon } from "lucide-react";
-
-export function Writer(props: {
-  title?: string;
-  content?: string;
-  description?: string;
-}) {
+export function Writer(props: { title?: string; content?: string }) {
   const [Artifact, { open, setOpen }] = useArtifact();
 
   return (
     <>
-      <div
-        onClick={() => setOpen(!open)}
-        className="cursor-pointer rounded-lg border p-4"
-      >
+      <div onClick={() => setOpen(!open)} className="cursor-pointer rounded-lg border p-4">
         <p className="font-medium">{props.title}</p>
-        <p className="text-sm text-gray-500">{props.description}</p>
       </div>
-
       <Artifact title={props.title}>
         <p className="p-4 whitespace-pre-wrap">{props.content}</p>
       </Artifact>
@@ -264,59 +304,65 @@ export function Writer(props: {
 }
 ```
 
+---
+
 ## Going to Production
 
-Once you're ready to go to production, you'll need to update how you connect, and authenticate requests to your deployment. By default, the Agent Chat UI is setup for local development, and connects to your LangGraph server directly from the client. This is not possible if you want to go to production, because it requires every user to have their own LangSmith API key, and set the LangGraph configuration themselves.
+By default, the UI connects directly to the LangGraph backend from the browser. For production, you need to proxy requests server-side to avoid exposing API keys.
 
-### Production Setup
+### Quickstart — API Passthrough
 
-To productionize the Agent Chat UI, you'll need to pick one of two ways to authenticate requests to your LangGraph server. Below, I'll outline the two options:
-
-### Quickstart - API Passthrough
-
-The quickest way to productionize the Agent Chat UI is to use the [API Passthrough](https://github.com/bracesproul/langgraph-nextjs-api-passthrough) package ([NPM link here](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough)). This package provides a simple way to proxy requests to your LangGraph server, and handle authentication for you.
-
-This repository already contains all of the code you need to start using this method. The only configuration you need to do is set the proper environment variables.
+Set these variables in your `.env`:
 
 ```bash
-NEXT_PUBLIC_ASSISTANT_ID="agent"
-# This should be the deployment URL of your LangGraph server
+NEXT_PUBLIC_ASSISTANT_ID="research_agent"
+# Your deployed LangGraph server URL
 LANGGRAPH_API_URL="https://my-agent.default.us.langgraph.app"
-# This should be the URL of your website + "/api". This is how you connect to the API proxy
+# Your website URL + /api (the proxy endpoint)
 NEXT_PUBLIC_API_URL="https://my-website.com/api"
-# Your LangSmith API key which is injected into requests inside the API proxy
+# Injected server-side — never expose to the browser
 LANGSMITH_API_KEY="lsv2_..."
 ```
 
-Let's cover what each of these environment variables does:
+See the [LangGraph Next.js API Passthrough](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) docs for full details.
 
-- `NEXT_PUBLIC_ASSISTANT_ID`: The ID of the assistant you want to use when fetching, and submitting runs via the chat interface. This still needs the `NEXT_PUBLIC_` prefix, since it's not a secret, and we use it on the client when submitting requests.
-- `LANGGRAPH_API_URL`: The URL of your LangGraph server. This should be the production deployment URL.
-- `NEXT_PUBLIC_API_URL`: The URL of your website + `/api`. This is how you connect to the API proxy. For the [Agent Chat demo](https://agentchat.vercel.app), this would be set as `https://agentchat.vercel.app/api`. You should set this to whatever your production URL is.
-- `LANGSMITH_API_KEY`: Your LangSmith API key to use when authenticating requests sent to LangGraph servers. Once again, do _not_ prefix this with `NEXT_PUBLIC_` since it's a secret, and is only used on the server when the API proxy injects it into the request to your deployed LangGraph server.
+### Custom Authentication
 
-For in depth documentation, consult the [LangGraph Next.js API Passthrough](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) docs.
-
-### Advanced Setup - Custom Authentication
-
-Custom authentication in your LangGraph deployment is an advanced, and more robust way of authenticating requests to your LangGraph server. Using custom authentication, you can allow requests to be made from the client, without the need for a LangSmith API key. Additionally, you can specify custom access controls on requests.
-
-To set this up in your LangGraph deployment, please read the LangGraph custom authentication docs for [Python](https://langchain-ai.github.io/langgraph/tutorials/auth/getting_started/), and [TypeScript here](https://langchain-ai.github.io/langgraphjs/how-tos/auth/custom_auth/).
-
-Once you've set it up on your deployment, you should make the following changes to the Agent Chat UI:
-
-1. Configure any additional API requests to fetch the authentication token from your LangGraph deployment which will be used to authenticate requests from the client.
-2. Set the `NEXT_PUBLIC_API_URL` environment variable to your production LangGraph deployment URL.
-3. Set the `NEXT_PUBLIC_ASSISTANT_ID` environment variable to the ID of the assistant you want to use when fetching, and submitting runs via the chat interface.
-4. Modify the [`useTypedStream`](src/providers/Stream.tsx) (extension of `useStream`) hook to pass your authentication token through headers to the LangGraph server:
+For more control, implement custom auth in your LangGraph deployment and pass the token via headers:
 
 ```tsx
 const streamValue = useTypedStream({
   apiUrl: process.env.NEXT_PUBLIC_API_URL,
   assistantId: process.env.NEXT_PUBLIC_ASSISTANT_ID,
-  // ... other fields
   defaultHeaders: {
-    Authentication: `Bearer ${addYourTokenHere}`, // this is where you would pass your authentication token
+    Authentication: `Bearer ${yourTokenHere}`,
   },
 });
 ```
+
+---
+
+## Extras — Additional Agents
+
+The backend also exposes two self-reflection agents. These are simpler than the Research Agent and intended for writing/iteration tasks rather than academic retrieval.
+
+### Self-Reflection Agent v1 (`self_reflection_agent`)
+
+A 4-node iterative loop that optionally searches the web via Tavily before generating and refining an answer through reflection.
+
+**Nodes:** `search_decision` → `web_search` *(optional)* → `generate` → `reflect` → *(loop or end)*
+
+- **Best for:** Writing tasks, report drafts, iterative content improvement
+- **Requires:** `TAVILY_API_KEY` (for web search)
+- **Max iterations:** 1–10 (default 3)
+
+### Self-Reflection Agent v2 (`self_reflection_agent_v2`)
+
+A simplified 2-node loop (no web search) that generates and reflects until the answer is approved.
+
+**Nodes:** `generate` → `reflect` → *(loop or end)*
+
+- **Best for:** Tasks that don't need external context
+- **Max iterations:** 1–10 (default 3)
+
+To switch to either agent in the UI, change `NEXT_PUBLIC_ASSISTANT_ID` to `self_reflection_agent` or `self_reflection_agent_v2`.

@@ -323,7 +323,7 @@ conda run -n agents python -m pytest tests/test_research_date_parser.py::test_ex
 
 ## Test Structure
 
-```
+```text
 tests/
 ├── test_agent.py                 # Self-reflection agent tests
 ├── test_persistence.py           # Persistence model and storage tests
