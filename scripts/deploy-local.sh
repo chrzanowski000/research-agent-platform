@@ -14,15 +14,20 @@ if [[ "$CONTEXT" != "docker-desktop" ]]; then
 fi
 
 echo "==> Building Docker images..."
-NO_CACHE="${NO_CACHE:-}" "${REPO_ROOT}/scripts/build-images.sh"
+"${REPO_ROOT}/scripts/build-images.sh"
+
+echo ""
+echo "==> Applying Kubernetes manifests (dev overlay)..."
+kubectl apply -k "${REPO_ROOT}/infrastructure/k8s/dev"
 
 echo ""
 echo "==> Injecting secrets from 1Password..."
 "${REPO_ROOT}/scripts/inject-secrets.sh"
 
 echo ""
-echo "==> Applying Kubernetes manifests (dev overlay)..."
-kubectl apply -k "${REPO_ROOT}/infrastructure/k8s/dev"
+echo "==> Restarting deployments to pick up secrets..."
+kubectl rollout restart deployment/langgraph-api
+kubectl rollout restart deployment/persistence-api
 
 echo ""
 echo "==> Waiting for deployments to be ready..."

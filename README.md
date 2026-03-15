@@ -91,6 +91,20 @@ Open: http://localhost:3000
 > kubectl port-forward svc/langgraph-api 2024:2024 &
 > ```
 
+### 5. LangSmith Studio (optional)
+
+LangSmith Studio lets you inspect your agent's graph, run it interactively, and debug individual nodes.
+
+**Prerequisite:** Forward the langgraph-api port so Studio can reach it from your browser:
+```bash
+kubectl port-forward svc/langgraph-api 2024:2024 &
+```
+
+Then go to [smith.langchain.com](https://smith.langchain.com) → Studio → configure the connection:
+- **Base URL:** `http://localhost:2024`
+
+Studio works regardless of whether `LANGSMITH_TRACING` is enabled.
+
 **Option B — NGINX Ingress:**
 
 Install the NGINX Ingress controller:
