@@ -7,7 +7,7 @@ from collections.abc import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from research_persistence_api.models import Base
+from models import Base
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/research.db")
 
