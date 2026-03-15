@@ -1,0 +1,68 @@
+# .github/workflows/build-and-push-images.yml
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repositories exist
+        run: |
+          for repo in agents/chat-ui agents/langgraph-api agents/persistence-api; do
+            aws ecr describe-repositories --repository-names "$repo" 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo"
+          done
+
+      - name: Build and push chat-ui
+        run: |
+          IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/agents/chat-ui"
+          docker build -f infrastructure/docker/chat-ui.Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" services/chat-ui/
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Build and push langgraph-api
+        run: |
+          IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/agents/langgraph-api"
+          docker build -f infrastructure/docker/langgraph-api.Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" services/langgraph-api/
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Build and push persistence-api
+        run: |
+          IMAGE="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/agents/persistence-api"
+          docker build -f infrastructure/docker/persistence-api.Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" services/persistence-api/
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Summary
+        run: |
+          echo "## Images pushed" >> $GITHUB_STEP_SUMMARY
+          echo "- **IMAGE_TAG**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy to EKS:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "export AWS_ACCOUNT_ID=${{ env.AWS_ACCOUNT_ID }} AWS_REGION=${{ env.AWS_REGION }} IMAGE_TAG=${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "./scripts/deploy-eks.sh" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
