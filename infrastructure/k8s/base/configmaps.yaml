@@ -1,0 +1,34 @@
+# infrastructure/k8s/base/configmaps.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  # Browser-facing (baked into Next.js bundle at build time)
+  NEXT_PUBLIC_API_URL: "/api"
+  NEXT_PUBLIC_ASSISTANT_ID: "self_reflection_agent"
+
+  # Server-side Next.js → langgraph-api
+  LANGGRAPH_API_URL: "http://langgraph-api:2024"
+  RESEARCH_PERSISTENCE_API_URL: "http://persistence-api:8001"
+
+  # Agent service internal URLs
+  DUCKLING_URL: "http://duckling:8000"
+  PERSISTENCE_API_URL: "http://persistence-api:8001"
+
+  # Postgres (non-secret parts)
+  POSTGRES_HOST: "postgres"
+  POSTGRES_DB: "research"
+  POSTGRES_USER: "postgres"
+
+  # Model config defaults
+  MODEL_NAME: "nvidia/nemotron-3-nano-30b-a3b:free"
+  OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1"
+  PERSIST_RUNS: "true"
+  USE_MOCK_S2: "false"
+  LOG_MODELS: "false"
+  LOG_LEVEL: "info"
+
+  # LangSmith tracing
+  LANGSMITH_TRACING: "false"
+  LANGSMITH_PROJECT: "self-reflection-agent"
