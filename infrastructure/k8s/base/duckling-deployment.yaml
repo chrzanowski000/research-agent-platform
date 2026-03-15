@@ -1,0 +1,40 @@
+# infrastructure/k8s/base/duckling-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duckling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: duckling
+  template:
+    metadata:
+      labels:
+        app: duckling
+      annotations:
+        prometheus.io/scrape: "false"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: duckling
+          image: rasa/duckling
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
