@@ -1,16 +1,12 @@
-FROM python:3.12-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-
+FROM langchain/langgraph-api:latest
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agents/ ./agents/
-COPY research_persistence_api/ ./research_persistence_api/
-COPY config.py langgraph.json ./
+COPY config.py .
+COPY langgraph.json .
 
 EXPOSE 2024
-
-CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024", "--no-browser"]
+# CMD inherited from base image — reads langgraph.json automatically
