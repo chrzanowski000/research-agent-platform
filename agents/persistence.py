@@ -150,12 +150,28 @@ def write_disk_artifacts(run: Run, query: Query, state: dict) -> None:
         json.dump(snapshot, f, ensure_ascii=False, indent=2, default=str)
 
 
+def delete_run_and_artifacts(db: Session, run_id: int) -> None:
+    """Delete a Run record (cascades to Sources) and remove its run snapshot from disk."""
+    run = db.query(Run).filter(Run.id == run_id).first()
+    if not run:
+        return
+    query = db.query(Query).filter(Query.id == run.query_id).first()
+    db.delete(run)
+    db.commit()
+    if query:
+        snapshot = os.path.join(query.folder_path, "runs", f"run_{run_id}.json")
+        if os.path.exists(snapshot):
+            os.remove(snapshot)
+
+
 def delete_query_and_artifacts(db: Session, query_id: int) -> None:
     """Delete DB records (cascade) and remove folder from disk."""
     query = db.query(Query).filter(Query.id == query_id).first()
     if not query:
         return
     folder_path = query.folder_path
+    # Explicitly delete sources first — sources.query_id FK is not in Query's cascade
+    db.query(Source).filter(Source.query_id == query_id).delete()
     db.delete(query)
     db.commit()
     shutil.rmtree(folder_path, ignore_errors=True)

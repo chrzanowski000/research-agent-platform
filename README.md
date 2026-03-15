@@ -1,19 +1,21 @@
 # LangGraph Multi-Agent Research & Reflection System
 
-This project contains three LangGraph agents for research, reflection, and interactive chat. Each agent has a distinct purpose and graph topology.
+This project contains three LangGraph agents plus a small FastAPI service for browsing persisted research runs. Each agent has a distinct purpose and graph topology.
 
 ---
 
 ## Project Structure
 
 ```
-├── agent.py                          # Self-Reflection Agent (v1)
 ├── agents/
+│   ├── self_reflection_agent.py      # Self-Reflection Agent (v1)
 │   ├── self_reflection_agent_v2.py   # Self-Reflection Agent (v2) with tool use
 │   └── research_agent.py             # Research Agent (plan-and-execute)
 ├── agent-chat-ui/                    # Next.js 15 chat interface
+├── research_persistence_api/         # FastAPI service for persisted research queries/runs/sources
 ├── tests/                            # Test suite
 ├── docker-compose.yml                # Docker Compose setup
+├── langgraph.json                    # LangGraph graph registry
 ├── config.py                         # Centralized configuration
 └── requirements.txt                  # Python dependencies
 ```
@@ -23,8 +25,8 @@ This project contains three LangGraph agents for research, reflection, and inter
 # Agent 1: Research Agent (Plan-and-Execute)
 
 **File:** `agents/research_agent.py`
-**Purpose:** Perform deep academic literature research on arXiv with structured query planning, date filtering, and semantic relevance filtering.
-**Best for:** Comprehensive research queries, academic paper discovery, date-constrained searches.
+**Purpose:** Perform deep research with structured query planning, date filtering, multi-source retrieval, semantic relevance filtering, and optional persistence.
+**Best for:** Research queries that need search planning, source ranking, date constraints, and a synthesized brief.
 
 ## Graph Architecture
 
@@ -78,13 +80,14 @@ This project contains three LangGraph agents for research, reflection, and inter
 |------|---------|
 | `parse_dates` | Extracts date constraints from the user query via [Duckling](https://github.com/facebook/duckling); produces `start_date`, `end_date` |
 | `extract_research_intent` | Analyzes query to extract structured intent: `problem_domains`, `methods`, `related_concepts` (3–5 phrases each) |
-| `generate_semantic_queries` | Generates 8–12 semantic search queries from the structured intent |
-| `normalize_queries` | Normalizes and deduplicates queries into bare arXiv-compatible strings |
-| `apply_date_filter` | Embeds arXiv `submittedDate:[YYYYMMDD0000 TO YYYYMMDD2359]` clause into queries when date range is present |
-| `execute_searches` | Runs all queries against the arXiv API and deduplicates results by URL |
-| `validate_date_range` | Post-retrieval check — removes arXiv papers whose submission date (from URL ID) falls outside requested range |
-| `rank_results_by_similarity` | Embedding cosine-similarity filter (threshold 0.95) using `BAAI/bge-large-en-v1.5` (local SentenceTransformer model); deduplicates by title |
+| `generate_semantic_queries` | Generates semantic search queries from the structured intent |
+| `normalize_queries` | Normalizes and deduplicates generated queries before search-plan assembly |
+| `apply_date_filter` | Applies extracted date constraints to the planned searches |
+| `execute_searches` | Runs the search plan against enabled sources and deduplicates results |
+| `validate_date_range` | Post-retrieval check that removes out-of-range results when date constraints are present |
+| `rank_results_by_similarity` | Embedding cosine-similarity filter (threshold 0.1) using `BAAI/bge-large-en-v1.5`; deduplicates by title |
 | `synthesize` | Synthesizes kept results into a structured research brief (Summary / Key Findings / Sources) |
+| `persist_run` | Optionally stores the final query, run, sources, and disk artifacts when `PERSIST_RUNS=true` |
 
 ## Running the Research Agent
 
@@ -112,8 +115,8 @@ python agents/research_agent.py "quantum error correction using machine learning
 # With date constraint (natural language)
 python agents/research_agent.py "nuclear fusion energy from 2023 to 2024"
 
-# With max searches limit
-python agents/research_agent.py "reinforcement learning" --max-searches 5
+# With query count limit
+python agents/research_agent.py "reinforcement learning" --query-count 5
 
 # Enable debug logging
 LOG_MODELS=true python agents/research_agent.py "topic"
@@ -126,7 +129,7 @@ from agents.research_agent import run_agent
 
 result = run_agent(
     topic="quantum parameter estimation using machine learning",
-    max_searches=10
+    query_count=5
 )
 
 print(result["synthesis"])        # Final research brief
@@ -138,7 +141,7 @@ print(result["date_filter"])      # Extracted date constraints (if any)
 
 # Agent 2: Self-Reflection Agent (v1)
 
-**File:** `agent.py`
+**File:** `agents/self_reflection_agent.py`
 **Purpose:** Iteratively generate and refine answers through reflection feedback loops.
 **Best for:** Writing tasks, report generation, iterative improvement of content.
 
@@ -190,16 +193,16 @@ print(result["date_filter"])      # Extracted date constraints (if any)
 
 ```bash
 # Run agent (enters interactive chat)
-python agent.py
+python agents/self_reflection_agent.py
 
 # Set model override
-MODEL_NAME="gpt-4" python agent.py
+MODEL_NAME="gpt-4" python agents/self_reflection_agent.py
 ```
 
 ### Python API
 
 ```python
-from agent import run_agent
+from agents.self_reflection_agent import run_agent
 
 result = run_agent(
     task="Write a comprehensive summary of quantum computing",
@@ -214,7 +217,7 @@ print(result["iterations"])   # Number of iterations used
 ### Enable Debug Output
 
 ```bash
-LOG_MODELS=true python agent.py
+LOG_MODELS=true python agents/self_reflection_agent.py
 ```
 
 ---
@@ -265,9 +268,9 @@ python agents/self_reflection_agent_v2.py
 ### Python API
 
 ```python
-from agents.self_reflection_agent_v2 import run_agent_v2
+from agents.self_reflection_agent_v2 import run_agent
 
-result = run_agent_v2(
+result = run_agent(
     task="Research and summarize recent ML papers",
     max_iterations=3
 )
@@ -275,6 +278,23 @@ result = run_agent_v2(
 print(result["output"])       # Final answer with tool results
 print(result["tool_calls"])   # Tools used during execution
 ```
+
+---
+
+# Research Persistence API
+
+**Package:** `research_persistence_api`
+**Purpose:** Browse and delete persisted research queries, runs, and sources written by the research agent.
+**Best for:** Inspecting prior research runs from the UI or directly over HTTP.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|------|---------|---------|
+| `GET` | `/research/queries` | List saved queries with run counts and last-run timestamps |
+| `GET` | `/research/queries/{query_id}` | Get one query plus its runs |
+| `GET` | `/research/runs/{run_id}` | Get one run plus its sources |
+| `DELETE` | `/research/queries/{query_id}` | Delete a query and its persisted artifacts |
 
 ---
 
@@ -305,17 +325,15 @@ conda run -n agents python -m pytest tests/test_research_date_parser.py::test_ex
 
 ```
 tests/
-├── test_research_date_parser.py  # 21 tests covering:
-│   ├── parse_dates node (6 tests)
-│   ├── apply_date_filter node (4 tests)
-│   ├── validate_date_range node (6 tests)
-│   └── semantic query pipeline (5 tests)
+├── test_agent.py                 # Self-reflection agent tests
+├── test_persistence.py           # Persistence model and storage tests
+└── test_research_date_parser.py  # Research date parsing and pipeline tests
 ```
 
 ## Coverage Summary
 
 - **parse_dates:** interval, single year, year range, no result, HTTP error, empty messages
-- **apply_date_filter:** date embedding, no date filter, respects max_searches, blocks on empty queries
+- **apply_date_filter:** date embedding, no date filter, respects query count limits, blocks on empty queries
 - **validate_date_range:** keeps in-range, removes out-of-range, no filter, all removed, non-arXiv, unparseable IDs
 - **Semantic pipeline:** intent extraction, semantic queries with domains, query deduplication, embedding-based filtering, state propagation
 
@@ -335,6 +353,7 @@ op run --env-file=.env_tpl -- docker compose up --build --remove-orphans
 Services available:
 - **Chat UI:** http://localhost:3000
 - **LangGraph API:** http://localhost:2024
+- **Research Persistence API:** http://localhost:8001
 - **LangSmith Studio:** https://smith.langchain.com/studio/?baseUrl=http://localhost:2024
 
 ### Option B: Manual Environment Variables
@@ -357,6 +376,8 @@ Then open **http://localhost:3000** in your browser.
 |---------|-----|---------|
 | Chat UI | http://localhost:3000 | Next.js 15 frontend for chat |
 | LangGraph API | http://localhost:2024 | Agent execution backend |
+| Research Persistence API | http://localhost:8001 | FastAPI service for persisted research data |
+| PostgreSQL | localhost:5432 | Research persistence database |
 | Duckling | http://localhost:8000 | Date parser service |
 | LangSmith Studio | https://smith.langchain.com/studio/?baseUrl=http://localhost:2024 | Agent tracing & debugging |
 
@@ -373,8 +394,9 @@ docker compose down
 docker compose logs -f
 
 # Specific service
-docker compose logs -f web     # Chat UI
-docker compose logs -f api     # LangGraph API
+docker compose logs -f ui      # Chat UI
+docker compose logs -f agent   # LangGraph API
+docker compose logs -f research-persistence-api
 docker compose logs -f duckling
 ```
 
@@ -422,6 +444,9 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional Duckling override
 DUCKLING_URL=http://localhost:8000
+
+# Database (PostgreSQL). For local dev, start postgres separately or use docker compose up postgres.
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/research
 ```
 
 ### 4. Start Duckling (for Research Agent)
@@ -475,13 +500,13 @@ export MODEL_NAME="nvidia/nemotron-3-nano-30b-a3b:free"
 ```python
 from agents.research_agent import run_agent
 
-def run_agent(topic: str, max_searches: int = 10) -> ResearchState:
+def run_agent(topic: str, query_count: int = 5) -> ResearchState:
     """
     Execute research agent on a topic.
 
     Args:
         topic: Research question or query (required, non-empty)
-        max_searches: Max number of arXiv queries to run (1-10, default 10)
+        query_count: Number of search queries to generate and run (default 5)
 
     Returns:
         ResearchState with:
@@ -492,7 +517,7 @@ def run_agent(topic: str, max_searches: int = 10) -> ResearchState:
             - block_reason: Error message if blocked (str)
 
     Raises:
-        ValueError: If topic is empty or max_searches out of range
+        ValueError: If topic is empty
     """
 ```
 
@@ -535,7 +560,7 @@ docker compose up duckling
 - Check arXiv has papers on your topic
 
 **"All results filtered out"**
-- Lower similarity threshold (edit `_EMBED_SIMILARITY_THRESHOLD` in `research_agent.py`, currently 0.95)
+- Lower similarity threshold (edit `SIMILARITY_THRESHOLD` in `agents/research_agent.py`, currently 0.1)
 - Use fewer, broader search terms
 - Note: Embedding-based filtering uses local `BAAI/bge-large-en-v1.5` model (no API needed)
 
@@ -547,8 +572,8 @@ docker compose up duckling
 lsof -i :3000
 kill -9 <PID>
 
-# Or use different port
-docker compose -f docker-compose.yml up -e API_PORT=2025
+# Or stop the conflicting local process and retry
+lsof -i :2024
 ```
 
 **Image build failures**

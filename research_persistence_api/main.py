@@ -123,6 +123,12 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     return _run_to_out(run, include_sources=True)
 
 
+@app.delete("/research/runs/{run_id}", status_code=204)
+def delete_run(run_id: int, db: Session = Depends(get_db)):
+    from agents.persistence import delete_run_and_artifacts
+    delete_run_and_artifacts(db, run_id)
+
+
 @app.delete("/research/queries/{query_id}", status_code=204)
 def delete_query(query_id: int, db: Session = Depends(get_db)):
     from agents.persistence import delete_query_and_artifacts
