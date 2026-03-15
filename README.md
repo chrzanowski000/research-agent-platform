@@ -46,20 +46,29 @@ kubectl config use-context docker-desktop
 kubectl get nodes
 ```
 
-### 2. Configure Secrets
+### 2. Configure Secrets (1Password)
 
-Edit `infrastructure/k8s/base/secrets.yaml`. Replace all `Y2hhbmdlbWU=` placeholders with your real base64-encoded values:
+Requires the [1Password CLI](https://developer.1password.com/docs/cli/) installed and signed in (`op signin`).
+
+Secrets are injected automatically from 1Password when you run `deploy-local.sh`. To inject manually without a full deploy:
 
 ```bash
-# Generate base64 value:
-echo -n 'your-real-api-key' | base64
+./scripts/inject-secrets.sh
 ```
 
-Secrets to configure:
-- `OPENROUTER_API_KEY` — OpenRouter or OpenAI API key
-- `LANGSMITH_API_KEY` — LangSmith tracing key (optional but recommended)
-- `TAVILY_API_KEY` — Tavily web search key (optional)
-- `POSTGRES_PASSWORD` — any strong password for the local database
+This reads `op://` references from `.env_tpl` and creates/updates the `app-secrets` Kubernetes Secret in memory — nothing is written to disk.
+
+The `.env_tpl` file contains `op://` vault references (e.g. `op://APIS/OPENROUTER_API_KEY_SELF_REFLECT/credential`) — these are safe to commit since they are paths, not real secrets.
+
+**If you don't use 1Password:** manually create the secret instead:
+```bash
+kubectl create secret generic app-secrets \
+  --from-literal=OPENROUTER_API_KEY='your-key' \
+  --from-literal=LANGSMITH_API_KEY='your-key' \
+  --from-literal=TAVILY_API_KEY='your-key' \
+  --from-literal=POSTGRES_PASSWORD='your-password' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
 
 ### 3. Deploy
 
@@ -96,6 +105,35 @@ Add to `/etc/hosts`:
 
 Open: http://agent.local
 
+### Applying Code Changes
+
+After modifying any service's code, you need to rebuild its Docker image and restart the deployment:
+
+**Option A — Rebuild everything (safest):**
+```bash
+./scripts/deploy-local.sh
+```
+
+**Option B — Rebuild a single service (faster):**
+```bash
+# 1. Rebuild the image
+docker build -t agents/langgraph-api:latest -f infrastructure/docker/langgraph-api.Dockerfile services/langgraph-api/
+# (replace langgraph-api with chat-ui or persistence-api as needed)
+
+# 2. Restart the deployment to pick up the new image
+kubectl rollout restart deployment/langgraph-api
+kubectl rollout status deployment/langgraph-api --timeout=180s
+```
+
+Image names and their Dockerfiles:
+| Service | Image | Dockerfile |
+|---|---|---|
+| langgraph-api | `agents/langgraph-api:latest` | `infrastructure/docker/langgraph-api.Dockerfile` |
+| chat-ui | `agents/chat-ui:latest` | `infrastructure/docker/chat-ui.Dockerfile` |
+| persistence-api | `agents/persistence-api:latest` | `infrastructure/docker/persistence-api.Dockerfile` |
+
+> Kubernetes does **not** watch your source files — it only runs images. A code change has no effect until you rebuild the image and restart the pod.
+
 ### Common kubectl Commands
 
 ```bash
@@ -114,6 +152,217 @@ kubectl describe pod <pod-name>
 # Delete everything
 kubectl delete -k infrastructure/k8s/dev
 ```
+
+---
+
+## Kubernetes Troubleshooting & Operations Manual
+
+This section documents real problems encountered during local Kubernetes setup and how to solve them.
+
+---
+
+### How the cluster works (mental model)
+
+**Docker Desktop provides:**
+- A single-node Kubernetes cluster running inside a VM
+- Kubernetes is started/stopped from Docker Desktop → Settings → Kubernetes
+- The cluster is **not started by `deploy-local.sh`** — you must start it yourself in Docker Desktop first
+
+**`deploy-local.sh` does:**
+1. Builds Docker images locally (they live in Docker's image cache, not a registry)
+2. Applies Kubernetes manifests (`kubectl apply -k infrastructure/k8s/dev`)
+3. Waits for all deployments to be ready
+
+**Kubernetes does NOT:**
+- Watch your source files
+- Automatically rebuild images when code changes
+- Pull images from the internet (dev overlay uses `imagePullPolicy: Never`)
+
+---
+
+### Starting and stopping the cluster
+
+**Start:** Docker Desktop → Settings → Kubernetes → Enable Kubernetes (if not already running)
+
+**Deploy everything from scratch:**
+```bash
+./scripts/deploy-local.sh
+```
+
+**Full reset (nuke everything and redeploy):**
+```bash
+# Delete all resources
+kubectl delete -k infrastructure/k8s/dev
+
+# Rebuild all images from scratch (no Docker cache)
+NO_CACHE=1 ./scripts/deploy-local.sh
+```
+
+**Why `NO_CACHE=1`?** Docker caches each build layer. If you change `requirements.txt` or other dependencies, Docker will use the cached pip install layer and your changes won't take effect. `NO_CACHE=1` forces a full rebuild from scratch.
+
+---
+
+### Diagnosing pod problems
+
+**Check pod status:**
+```bash
+kubectl get pods
+```
+
+Status meanings:
+- `Running` — healthy
+- `CrashLoopBackOff` — pod is crashing and Kubernetes keeps restarting it
+- `Pending` — waiting for resources (rare on Docker Desktop)
+- `ImagePullBackOff` — can't find the Docker image (usually means you haven't built it yet)
+- `Error` — crashed once, not yet in loop
+
+**See why a pod crashed (most useful command):**
+```bash
+# View current logs
+kubectl logs deployment/langgraph-api
+
+# Follow logs in real time
+kubectl logs deployment/langgraph-api -f
+
+# View logs from a crashed container (previous run)
+kubectl logs deployment/langgraph-api --previous
+```
+
+**See Kubernetes events for a pod (useful for probe failures, image errors):**
+```bash
+kubectl describe pod <pod-name>
+```
+Events are at the bottom. Look for: `Readiness probe failed`, `Back-off restarting failed container`, `Failed to pull image`.
+
+**Get exact pod name:**
+```bash
+kubectl get pods
+# copy the full name, e.g.: langgraph-api-6d8f9b-xkj2p
+kubectl describe pod langgraph-api-6d8f9b-xkj2p
+```
+
+---
+
+### Common problems and solutions
+
+#### Problem: `CrashLoopBackOff` on langgraph-api
+
+**Symptom:** `kubectl get pods` shows langgraph-api as `CrashLoopBackOff`
+
+**Diagnosis:**
+```bash
+kubectl logs deployment/langgraph-api --previous
+```
+
+**Root cause we hit:** Missing Python dependencies. `research_agent.py` imports `numpy`, `httpx`, `sentence_transformers`, and `tenacity` — but none of these were in `requirements.txt`.
+
+**Error looked like:**
+```
+ModuleNotFoundError: No module named 'numpy'
+```
+
+**Fix:** Add the missing package to `services/langgraph-api/requirements.txt`, then rebuild with `--no-cache` (critical — otherwise Docker reuses the cached pip layer and the fix doesn't take effect):
+```bash
+NO_CACHE=1 ./scripts/deploy-local.sh
+```
+
+**Why `--no-cache` is required for dependency changes:** Docker caches `pip install` as a layer. Without `--no-cache`, the old layer (without the new package) is reused even if `requirements.txt` changed.
+
+---
+
+#### Problem: Deployment stuck on "Waiting for rollout"
+
+**Symptom:**
+```
+Waiting for deployment "langgraph-api" rollout to finish: 0 of 1 updated replicas are available...
+error: deployment "langgraph-api" exceeded its progress deadline
+```
+
+**Causes:**
+1. Pod is crashing (see CrashLoopBackOff above)
+2. Readiness probe is failing (pod starts but health check never passes)
+
+**Diagnosis:**
+```bash
+kubectl describe pod <pod-name>
+# Look at Events section — readiness probe failures will appear there
+```
+
+If readiness probes are failing but the pod is running, the app inside may be starting slowly or on the wrong port.
+
+---
+
+#### Problem: `port-forward` keeps dropping connections
+
+**Symptom:** You run `kubectl port-forward svc/chat-ui 3000:3000` and it works for a while, then requests stop working or you get connection refused. The pod is still running.
+
+**Root cause:** `kubectl port-forward` is a development tool, not a production proxy. It creates a direct tunnel over the Kubernetes API server. This tunnel drops under load, after idle periods, or spontaneously.
+
+**Solution:** Use NGINX Ingress instead (see "Setting up NGINX Ingress" below). It's a stable in-cluster reverse proxy that doesn't drop.
+
+---
+
+#### Problem: Redis was added but isn't needed
+
+**Background:** When using the licensed `langchain/langgraph-api:3.12` image, Redis is required as a message queue. After switching to the open-source `langgraph dev` (via `langgraph-cli[inmem]`), Redis is no longer needed.
+
+**Fix:** Remove `redis-deployment.yaml` from `infrastructure/k8s/base/kustomization.yaml` resources list.
+
+---
+
+### Setting up NGINX Ingress (stable local access)
+
+Instead of running `kubectl port-forward` (which drops connections), install the NGINX Ingress controller. This gives you a stable URL at `http://agent.local`.
+
+**Step 1: Install the NGINX Ingress controller**
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+```
+
+**Step 2: Wait for it to be ready**
+```bash
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=120s
+```
+
+**Step 3: Add `agent.local` to your `/etc/hosts`**
+```bash
+echo "127.0.0.1 agent.local" | sudo tee -a /etc/hosts
+```
+
+> This requires your Mac password because `/etc/hosts` is a system file that requires root access to edit. `sudo` elevates the `tee` command to run as root.
+
+**How `/etc/hosts` works:**
+- Your OS checks `/etc/hosts` before querying DNS
+- The entry `127.0.0.1 agent.local` means: when any app (browser, curl) tries to connect to `agent.local`, resolve it to `127.0.0.1` (your machine)
+- NGINX Ingress controller is listening on port 80 of `127.0.0.1` and routes based on the `Host` header to the right service
+
+**Step 4: Open in browser**
+```bash
+open http://agent.local
+```
+
+**To view or edit `/etc/hosts` later:**
+```bash
+sudo nano /etc/hosts
+# or
+cat /etc/hosts
+```
+
+---
+
+### langgraph dev vs langchain/langgraph-api (licensed)
+
+| | `langgraph dev` (open-source) | `langchain/langgraph-api:3.12` (licensed) |
+|---|---|---|
+| Image | Built from our Dockerfile using `langgraph-cli[inmem]` | Pre-built by LangChain |
+| Cost | Free | Requires LangSmith Plus or Enterprise |
+| Redis | Not needed | Required |
+| Use case | Local dev, self-hosted | LangChain Cloud, enterprise |
+
+This project uses `langgraph dev` (open-source). The Dockerfile at `infrastructure/docker/langgraph-api.Dockerfile` builds from `python:3.12-slim` and installs `langgraph-cli[inmem]` via pip.
 
 ---
 

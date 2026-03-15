@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useQueryState } from "nuqs";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -219,7 +220,7 @@ function LoopRow({
   count,
   active,
 }: {
-  children?: unknown;
+  children?: React.ReactNode;
   count: number;
   active: boolean;
 }) {
