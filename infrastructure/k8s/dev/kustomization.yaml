@@ -1,0 +1,32 @@
+# infrastructure/k8s/dev/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+# Override image pull policy to Never (use locally built images).
+# NOTE: The base Deployment manifests do not set imagePullPolicy, so we use
+# op: add (not replace) — JSON Patch replace fails if the field does not exist.
+patches:
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: chat-ui
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: langgraph-api
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: persistence-api
