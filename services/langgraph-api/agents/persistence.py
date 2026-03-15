@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from agents.query_utils import make_slug, normalize_query
-from research_persistence_api.database import SessionLocal
-from research_persistence_api.models import Query, Run, Source
+from database import SessionLocal
+from models import Query, Run, Source
 
 logger = logging.getLogger(__name__)
 

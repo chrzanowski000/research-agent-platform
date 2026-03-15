@@ -1078,7 +1078,7 @@ def persist_run(state: ResearchState) -> ResearchState:
             persist_sources,
             write_disk_artifacts,
         )
-        from research_persistence_api.database import SessionLocal, init_db
+        from database import SessionLocal, init_db
 
         init_db()
         db = SessionLocal()

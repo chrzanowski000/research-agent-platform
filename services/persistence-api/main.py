@@ -10,9 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from research_persistence_api.database import get_db, init_db
-from research_persistence_api.models import Query, Run, Source
-from research_persistence_api.schemas import QueryDetailOut, QueryOut, RunOut, SourceOut
+from database import get_db, init_db
+from models import Query, Run, Source
+from schemas import QueryDetailOut, QueryOut, RunOut, SourceOut
 
 
 @asynccontextmanager
