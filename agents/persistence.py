@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from agents.query_utils import make_slug, normalize_query
-from api.database import SessionLocal
-from api.models import Query, Run, Source
+from research_persistence_api.database import SessionLocal
+from research_persistence_api.models import Query, Run, Source
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +116,9 @@ def persist_sources(db: Session, run: Run, search_results: list[dict]) -> None:
             source_type=result.get("source"),
             title=result.get("title"),
             authors_json=authors_json,
-            publication_date=str(result["year"]) if result.get("year") else None,
+            publication_date=result.get("publication_date"),
             url=result.get("url"),
-            snippet=result.get("abstract"),
+            snippet=result.get("snippet"),
             similarity_score=result.get("similarity_score"),
             metadata_json=json.dumps(metadata) if metadata else None,
             created_at=now,

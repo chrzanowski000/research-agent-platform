@@ -16,6 +16,7 @@ services:
       DUCKLING_URL: ${DUCKLING_URL:-http://duckling:8000}
       DATABASE_URL: sqlite:////app/data/research.db
       PERSIST_RUNS: ${PERSIST_RUNS:-false}
+      USE_MOCK_S2: ${USE_MOCK_S2:-false}
       # Startup diagnostics
       LOG_MODELS: ${LOG_MODELS:-false}
       # Per-agent/node model overrides
@@ -51,7 +52,7 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:2024
       NEXT_PUBLIC_ASSISTANT_ID: self_reflection_agent
       LANGGRAPH_API_URL: http://agent:2024
-      RESEARCH_API_URL: http://research-api:8001
+      RESEARCH_PERSISTENCE_API_URL: http://research-persistence-api:8001
     depends_on:
       agent:
         condition: service_healthy
@@ -61,10 +62,10 @@ services:
     ports:
       - "8000:8000"
 
-  research-api:
+  research-persistence-api:
     build:
       context: .
-      dockerfile: api/Dockerfile
+      dockerfile: research_persistence_api/Dockerfile
     ports:
       - "8001:8001"
     volumes:

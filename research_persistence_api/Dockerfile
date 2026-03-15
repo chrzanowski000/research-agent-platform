@@ -9,12 +9,12 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install API-specific dependencies
-COPY api/requirements.txt ./api/requirements.txt
-RUN pip install --no-cache-dir -r api/requirements.txt
+COPY research_persistence_api/requirements.txt ./research_persistence_api/requirements.txt
+RUN pip install --no-cache-dir -r research_persistence_api/requirements.txt
 
 COPY config.py ./config.py
 COPY agents/ ./agents/
-COPY api/ ./api/
+COPY research_persistence_api/ ./research_persistence_api/
 
 EXPOSE 8001
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "research_persistence_api.main:app", "--host", "0.0.0.0", "--port", "8001"]

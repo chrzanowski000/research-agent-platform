@@ -48,7 +48,7 @@ except ConfigError as _cfg_err:
 # ---------------------------------------------------------------------------
 
 # Minimum cosine similarity (0–1) a result must score against the query embedding to be kept
-SIMILARITY_THRESHOLD = 0.5
+SIMILARITY_THRESHOLD = 0.1
 
 # How many search queries to generate and execute per research run
 QUERY_COUNT = 5
@@ -342,12 +342,57 @@ def _github_search(query: str, date_filter: dict | None = None) -> list[dict]:
 
 
 
+_MOCK_S2_PAPERS = [
+    {
+        "title": "Mock Paper: Advances in {query}",
+        "authors": "Alice Smith, Bob Jones, Carol Lee",
+        "publication_date": "2024-03-15",
+        "url": "https://arxiv.org/abs/2401.00001",
+        "snippet": "This mock paper explores {query} using novel methods. Results show significant improvement over baselines.",
+    },
+    {
+        "title": "Mock Paper: A Survey of {query}",
+        "authors": "David Kim, Eva Brown",
+        "publication_date": "2023-11-01",
+        "url": "https://arxiv.org/abs/2311.00002",
+        "snippet": "We survey recent work on {query} and identify open challenges and promising directions.",
+    },
+    {
+        "title": "Mock Paper: Benchmarking {query}",
+        "authors": "Frank Zhang",
+        "publication_date": "2024-01-20",
+        "url": "https://doi.org/10.1000/mock.003",
+        "snippet": "A comprehensive benchmark for {query} across multiple datasets and evaluation metrics.",
+    },
+]
+
+
+def _mock_semantic_scholar_search(query: str, date_filter: dict | None = None) -> list[dict]:
+    """Return mock S2 results for offline/testing use. Enable with USE_MOCK_S2=true."""
+    results = [
+        {
+            "source": "semantic_scholar",
+            "title": p["title"].replace("{query}", query),
+            "authors": p["authors"],
+            "publication_date": p["publication_date"],
+            "url": p["url"],
+            "snippet": p["snippet"].replace("{query}", query),
+        }
+        for p in _MOCK_S2_PAPERS
+    ]
+    logger.info("Mock S2: returning %d results for query %r", len(results), query[:60])
+    return results
+
+
 def _semantic_scholar_search(query: str, date_filter: dict | None = None) -> list[dict]:
     """Search Semantic Scholar for academic papers using the public Graph API.
 
     Fetches up to S2_DATE_FETCH_LIMIT papers by relevance. When date_filter is provided,
     results are filtered post-fetch by publicationDate.
     """
+    if os.getenv("USE_MOCK_S2", "").lower() == "true":
+        return _mock_semantic_scholar_search(query, date_filter)
+
     start_date = (date_filter or {}).get("start_date", "")
     end_date = (date_filter or {}).get("end_date", "")
 
@@ -887,6 +932,7 @@ def rank_results_by_similarity(state: ResearchState) -> dict:
         sim = float(np.dot(query_emb, doc_emb))
         title_key = result.get("title", "").lower().strip()
         if sim >= SIMILARITY_THRESHOLD and title_key not in seen_titles:
+            result["similarity_score"] = round(float(sim), 4)
             kept.append(result)
             seen_titles.add(title_key)
         else:
@@ -1032,7 +1078,7 @@ def persist_run(state: ResearchState) -> ResearchState:
             persist_sources,
             write_disk_artifacts,
         )
-        from api.database import SessionLocal, init_db
+        from research_persistence_api.database import SessionLocal, init_db
 
         init_db()
         db = SessionLocal()
