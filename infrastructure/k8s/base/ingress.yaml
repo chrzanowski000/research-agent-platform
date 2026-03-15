@@ -1,0 +1,37 @@
+# infrastructure/k8s/base/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agents-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: agent.local
+      http:
+        paths:
+          # Root → chat-ui (no rewrite needed)
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: chat-ui
+                port:
+                  number: 3000
+          # /api/... → langgraph-api (strip /api prefix)
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: langgraph-api
+                port:
+                  number: 2024
+          # /research/... → persistence-api (strip /research prefix)
+          - path: /research(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: persistence-api
+                port:
+                  number: 8001
