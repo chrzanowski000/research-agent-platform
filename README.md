@@ -1,615 +1,173 @@
-# LangGraph Multi-Agent Research & Reflection System
+# agents-self-reflect
 
-This project contains three LangGraph agents plus a small FastAPI service for browsing persisted research runs. Each agent has a distinct purpose and graph topology.
+A multi-agent chat platform powered by LangGraph, featuring self-reflection agents and research capabilities.
+
+## Architecture
+
+```
+Browser → chat-ui (3000)
+             ↓
+     NGINX Ingress (/api → langgraph-api, /research → persistence-api)
+             ↓                                    ↓
+  langgraph-api (2024)              persistence-api (8001)
+       ↓         ↓                         ↓
+  duckling    postgres (5432) ←────────────┘
+   (8000)
+```
+
+### Services
+
+| Service | Port | Description |
+|---|---|---|
+| chat-ui | 3000 | Next.js 15 frontend |
+| langgraph-api | 2024 | LangGraph agent backend (self-reflection, research) |
+| persistence-api | 8001 | FastAPI REST API for browsing research runs |
+| duckling | 8000 | Rasa Duckling date parser |
+| postgres | 5432 | PostgreSQL database |
 
 ---
 
-## Project Structure
-
-```
-├── agents/
-│   ├── self_reflection_agent.py      # Self-Reflection Agent (v1)
-│   ├── self_reflection_agent_v2.py   # Self-Reflection Agent (v2) with tool use
-│   └── research_agent.py             # Research Agent (plan-and-execute)
-├── agent-chat-ui/                    # Next.js 15 chat interface
-├── research_persistence_api/         # FastAPI service for persisted research queries/runs/sources
-├── tests/                            # Test suite
-├── docker-compose.yml                # Docker Compose setup
-├── langgraph.json                    # LangGraph graph registry
-├── config.py                         # Centralized configuration
-└── requirements.txt                  # Python dependencies
-```
-
----
-
-# Agent 1: Research Agent (Plan-and-Execute)
-
-**File:** `agents/research_agent.py`
-**Purpose:** Perform deep research with structured query planning, date filtering, multi-source retrieval, semantic relevance filtering, and optional persistence.
-**Best for:** Research queries that need search planning, source ranking, date constraints, and a synthesized brief.
-
-## Graph Architecture
-
-```
-                         ┌─────────────────┐
-                         │  parse_dates    │
-                         └────────┬────────┘
-                                  │
-                         ┌────────▼──────────┐
-                         │extract_research  │
-                         │intent            │
-                         └────────┬──────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │generate_semantic_    │
-                         │queries               │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │normalize_queries     │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │apply_date_filter     │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │execute_searches     │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │validate_date_range   │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │rank_results_by_      │
-                         │similarity            │
-                         └────────┬──────────────┘
-                                  │
-                         ┌────────▼──────────────┐
-                         │synthesize            │
-                         └────────┬──────────────┘
-                                  │
-                                  ▼
-                                [END]
-```
-
-## Pipeline Nodes
-
-| Node | Purpose |
-|------|---------|
-| `parse_dates` | Extracts date constraints from the user query via [Duckling](https://github.com/facebook/duckling); produces `start_date`, `end_date` |
-| `extract_research_intent` | Analyzes query to extract structured intent: `problem_domains`, `methods`, `related_concepts` (3–5 phrases each) |
-| `generate_semantic_queries` | Generates semantic search queries from the structured intent |
-| `normalize_queries` | Normalizes and deduplicates generated queries before search-plan assembly |
-| `apply_date_filter` | Applies extracted date constraints to the planned searches |
-| `execute_searches` | Runs the search plan against enabled sources and deduplicates results |
-| `validate_date_range` | Post-retrieval check that removes out-of-range results when date constraints are present |
-| `rank_results_by_similarity` | Embedding cosine-similarity filter (threshold 0.1) using `BAAI/bge-large-en-v1.5`; deduplicates by title |
-| `synthesize` | Synthesizes kept results into a structured research brief (Summary / Key Findings / Sources) |
-| `persist_run` | Optionally stores the final query, run, sources, and disk artifacts when `PERSIST_RUNS=true` |
-
-## Running the Research Agent
+## Local Kubernetes Deployment (Docker Desktop)
 
 ### Prerequisites
 
-1. **Duckling service** (for date parsing):
-   ```bash
-   docker compose up duckling
-   ```
-   Default URL: `http://localhost:8000` (override with `DUCKLING_URL` environment variable).
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with Kubernetes enabled
+- `kubectl` CLI
+- `docker` CLI
+- `pnpm` (for local frontend development only)
 
-2. **Environment variables:**
-   ```bash
-   export OPENROUTER_API_KEY="your_openrouter_api_key"
-   export TAVILY_API_KEY="your_tavily_api_key"  # optional, currently unused
-   export LANGSMITH_API_KEY="your_langsmith_api_key"  # optional, for tracing
-   ```
+### 1. Enable Kubernetes in Docker Desktop
 
-### Command Line Usage
+Docker Desktop → Settings → Kubernetes → Enable Kubernetes → Apply
 
+Verify:
 ```bash
-# Basic query
-python agents/research_agent.py "quantum error correction using machine learning"
-
-# With date constraint (natural language)
-python agents/research_agent.py "nuclear fusion energy from 2023 to 2024"
-
-# With query count limit
-python agents/research_agent.py "reinforcement learning" --query-count 5
-
-# Enable debug logging
-LOG_MODELS=true python agents/research_agent.py "topic"
+kubectl config use-context docker-desktop
+kubectl get nodes
 ```
 
-### Python API
+### 2. Configure Secrets
 
-```python
-from agents.research_agent import run_agent
+Edit `infrastructure/k8s/base/secrets.yaml`. Replace all `Y2hhbmdlbWU=` placeholders with your real base64-encoded values:
 
-result = run_agent(
-    topic="quantum parameter estimation using machine learning",
-    query_count=5
-)
+```bash
+# Generate base64 value:
+echo -n 'your-real-api-key' | base64
+```
 
-print(result["synthesis"])        # Final research brief
-print(result["search_results"])   # List of papers kept after filtering
-print(result["date_filter"])      # Extracted date constraints (if any)
+Secrets to configure:
+- `OPENROUTER_API_KEY` — OpenRouter or OpenAI API key
+- `LANGSMITH_API_KEY` — LangSmith tracing key (optional but recommended)
+- `TAVILY_API_KEY` — Tavily web search key (optional)
+- `POSTGRES_PASSWORD` — any strong password for the local database
+
+### 3. Deploy
+
+```bash
+./scripts/deploy-local.sh
+```
+
+This builds all Docker images locally and applies the dev Kubernetes overlay.
+
+### 4. Access the App
+
+**Option A — Port-forward (simplest):**
+```bash
+kubectl port-forward svc/chat-ui 3000:3000 &
+```
+Open: http://localhost:3000
+
+> **Note:** With port-forward, the browser cannot reach `langgraph-api` via `/api`. For full functionality without Ingress, set `NEXT_PUBLIC_API_URL=http://localhost:2024` in the ConfigMap and also forward the backend:
+> ```bash
+> kubectl port-forward svc/langgraph-api 2024:2024 &
+> ```
+
+**Option B — NGINX Ingress:**
+
+Install the NGINX Ingress controller:
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+```
+
+Add to `/etc/hosts`:
+```
+127.0.0.1 agent.local
+```
+
+Open: http://agent.local
+
+### Common kubectl Commands
+
+```bash
+# View all pods
+kubectl get pods
+
+# View logs
+kubectl logs deployment/langgraph-api -f
+
+# Restart a deployment
+kubectl rollout restart deployment/chat-ui
+
+# Check pod status
+kubectl describe pod <pod-name>
+
+# Delete everything
+kubectl delete -k infrastructure/k8s/dev
 ```
 
 ---
 
-# Agent 2: Self-Reflection Agent (v1)
-
-**File:** `agents/self_reflection_agent.py`
-**Purpose:** Iteratively generate and refine answers through reflection feedback loops.
-**Best for:** Writing tasks, report generation, iterative improvement of content.
-
-## Graph Architecture
-
-```
-                    ┌─────────────────────┐
-                    │  search_decision    │◄───────────────────┐
-                    └──────────┬──────────┘                    │
-                               │                               │
-                      search_needed?                           │
-                      ┌────yes─┴──no────┐                      │
-                      ▼                 ▼                      │
-                ┌──────────────┐  ┌──────────────┐             │
-                │  web_search  │─►│  generate    │             │
-                └──────────────┘  └──────┬───────┘             │
-                                         ▼                     │
-                                 ┌──────────────┐              │
-                                 │  reflect     │              │
-                                 └──────┬───────┘              │
-                                        │                      │
-                              approved / max_iterations?       │
-                              ┌───yes──┴──no─────────────────►┘
-                              ▼
-                            [END]
-```
-
-## Pipeline Nodes
-
-| Node | Purpose |
-|------|---------|
-| `search_decision` | LLM decides whether web search is needed for current task; respects `max_web_searches` budget per turn |
-| `web_search` | *(optional)* If needed, [Tavily](https://tavily.com) fetches external context with exponential-backoff retry |
-| `generate` | Generate or improve draft answer, informed by search context and reflection feedback; PII masking on inputs/outputs |
-| `reflect` | Review draft for correctness, completeness, clarity; approve or provide actionable feedback for loop repeat (max `max_iterations`, default 3) |
-
-## Running Self-Reflection Agent (v1)
+## EKS Deployment
 
 ### Prerequisites
 
-1. **Environment variables:**
-   ```bash
-   export OPENROUTER_API_KEY="your_openrouter_api_key"
-   export TAVILY_API_KEY="your_tavily_api_key"
-   export LANGSMITH_API_KEY="your_langsmith_api_key"  # optional
-   ```
+1. AWS CLI configured and `kubectl` connected to your EKS cluster.
+2. Push to `main` at least once — the CI workflow (`.github/workflows/build-and-push-images.yml`) builds all images and creates ECR repositories automatically. ECR repos are **not** created by `deploy-eks.sh`.
+3. Required GitHub secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_ACCOUNT_ID`.
+4. Note the `IMAGE_TAG` (commit SHA) printed in the workflow job summary.
 
-### Command Line Usage
+### Deploy
 
 ```bash
-# Run agent (enters interactive chat)
-python agents/self_reflection_agent.py
+aws eks update-kubeconfig --region us-east-1 --name <your-cluster-name>
 
-# Set model override
-MODEL_NAME="gpt-4" python agents/self_reflection_agent.py
+export AWS_ACCOUNT_ID=123456789012
+export AWS_REGION=us-east-1
+export IMAGE_TAG=<commit-sha-from-ci-summary>
+
+./scripts/deploy-eks.sh
 ```
 
-### Python API
+### CI/CD
 
-```python
-from agents.self_reflection_agent import run_agent
-
-result = run_agent(
-    task="Write a comprehensive summary of quantum computing",
-    max_iterations=3
-)
-
-print(result["output"])       # Final generated answer
-print(result["web_context"])  # Search results (if any)
-print(result["iterations"])   # Number of iterations used
-```
-
-### Enable Debug Output
-
-```bash
-LOG_MODELS=true python agents/self_reflection_agent.py
-```
+Push to `main` triggers the build workflow. The workflow job summary shows the exact `IMAGE_TAG` (commit SHA) to use with `deploy-eks.sh`.
 
 ---
 
-# Agent 3: Self-Reflection Agent (v2)
+## Development
 
-**File:** `agents/self_reflection_agent_v2.py`
-**Purpose:** Enhanced reflection agent with tool use capabilities.
-**Best for:** Complex tasks requiring external tool integration, structured workflows.
-
-## Graph Architecture
-
-```
-                    ┌──────────────────────┐
-                    │  router / dispatcher │◄─────────────────┐
-                    └──────────┬───────────┘                  │
-                               │                              │
-                    ┌──────────┴──────────┐                   │
-                    ▼                     ▼                   │
-            ┌──────────────┐      ┌──────────────┐            │
-            │  tool_agent  │      │  generate    │            │
-            └──────┬───────┘      └──────┬───────┘            │
-                   │                     │                    │
-                   └────────────┬────────┘                    │
-                                ▼                            │
-                        ┌──────────────┐                     │
-                        │  reflect     │                     │
-                        └──────┬───────┘                     │
-                               │                            │
-                     approved / max_iterations?             │
-                     ┌───yes──┴──no──────────────────────►┘
-                     ▼
-                   [END]
-```
-
-## Running Self-Reflection Agent (v2)
-
-### Prerequisites
-
-Same as v1 (see above).
-
-### Command Line Usage
+### Run tests
 
 ```bash
-python agents/self_reflection_agent_v2.py
-```
-
-### Python API
-
-```python
-from agents.self_reflection_agent_v2 import run_agent
-
-result = run_agent(
-    task="Research and summarize recent ML papers",
-    max_iterations=3
-)
-
-print(result["output"])       # Final answer with tool results
-print(result["tool_calls"])   # Tools used during execution
-```
-
----
-
-# Research Persistence API
-
-**Package:** `research_persistence_api`
-**Purpose:** Browse and delete persisted research queries, runs, and sources written by the research agent.
-**Best for:** Inspecting prior research runs from the UI or directly over HTTP.
-
-## Endpoints
-
-| Method | Path | Purpose |
-|------|---------|---------|
-| `GET` | `/research/queries` | List saved queries with run counts and last-run timestamps |
-| `GET` | `/research/queries/{query_id}` | Get one query plus its runs |
-| `GET` | `/research/runs/{run_id}` | Get one run plus its sources |
-| `DELETE` | `/research/queries/{query_id}` | Delete a query and its persisted artifacts |
-
----
-
-# Testing
-
-## Running All Tests
-
-```bash
-# Using conda environment
 conda run -n agents python -m pytest tests/ -v
-
-# Or activate environment first
-conda activate agents
-pytest tests/ -v
 ```
 
-## Running Specific Test Suites
+### Build images manually
 
 ```bash
-# Research agent tests only
-conda run -n agents python -m pytest tests/test_research_date_parser.py -v
-
-# Specific test
-conda run -n agents python -m pytest tests/test_research_date_parser.py::test_extract_research_intent_returns_valid_schema -v
+./scripts/build-images.sh
 ```
 
-## Test Structure
-
-```text
-tests/
-├── test_agent.py                 # Self-reflection agent tests
-├── test_persistence.py           # Persistence model and storage tests
-└── test_research_date_parser.py  # Research date parsing and pipeline tests
-```
-
-## Coverage Summary
-
-- **parse_dates:** interval, single year, year range, no result, HTTP error, empty messages
-- **apply_date_filter:** date embedding, no date filter, respects query count limits, blocks on empty queries
-- **validate_date_range:** keeps in-range, removes out-of-range, no filter, all removed, non-arXiv, unparseable IDs
-- **Semantic pipeline:** intent extraction, semantic queries with domains, query deduplication, embedding-based filtering, state propagation
-
----
-
-# Docker Deployment
-
-## Quick Start (Recommended)
-
-### Option A: 1Password Integration (No Secrets on Disk)
+### Local frontend development (without Kubernetes)
 
 ```bash
-# Prerequisites: op CLI installed and signed in
-op run --env-file=.env_tpl -- docker compose up --build --remove-orphans
-```
-
-Services available:
-- **Chat UI:** http://localhost:3000
-- **LangGraph API:** http://localhost:2024
-- **Research Persistence API:** http://localhost:8001
-- **LangSmith Studio:** https://smith.langchain.com/studio/?baseUrl=http://localhost:2024
-
-### Option B: Manual Environment Variables
-
-```bash
-# Set required variables
-export OPENROUTER_API_KEY="your_key"
-export TAVILY_API_KEY="your_key"
-export LANGSMITH_API_KEY="your_key"
-
-# Start services
-docker compose up --build --remove-orphans
-```
-
-Then open **http://localhost:3000** in your browser.
-
-## Services
-
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Chat UI | http://localhost:3000 | Next.js 15 frontend for chat |
-| LangGraph API | http://localhost:2024 | Agent execution backend |
-| Research Persistence API | http://localhost:8001 | FastAPI service for persisted research data |
-| PostgreSQL | localhost:5432 | Research persistence database |
-| Duckling | http://localhost:8000 | Date parser service |
-| LangSmith Studio | https://smith.langchain.com/studio/?baseUrl=http://localhost:2024 | Agent tracing & debugging |
-
-## Stopping Docker
-
-```bash
-docker compose down
-```
-
-## Viewing Logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f ui      # Chat UI
-docker compose logs -f agent   # LangGraph API
-docker compose logs -f research-persistence-api
-docker compose logs -f duckling
+cd services/chat-ui
+pnpm install
+pnpm dev
 ```
 
 ---
 
-# Setup & Installation
+## Legacy: Docker Compose
 
-## Local Development
-
-### 1. Create Python Environment
-
-```bash
-# Using conda
-conda create -n agents python=3.11
-conda activate agents
-
-# Or using venv
-python -m venv .venv
-source .venv/bin/activate
-```
-
-### 2. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure Environment
-
-Create `.env` file (or set environment variables):
-
-```bash
-# Required
-OPENROUTER_API_KEY=your_openrouter_key
-TAVILY_API_KEY=your_tavily_key
-
-# Optional but recommended
-LANGSMITH_API_KEY=your_langsmith_key
-LANGSMITH_TRACING=true
-LANGSMITH_PROJECT=agents-self-reflect
-
-# Optional model overrides
-MODEL_NAME=nvidia/nemotron-3-nano-30b-a3b:free
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-
-# Optional Duckling override
-DUCKLING_URL=http://localhost:8000
-
-# Database (PostgreSQL). For local dev, start postgres separately or use docker compose up postgres.
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/research
-```
-
-### 4. Start Duckling (for Research Agent)
-
-```bash
-docker compose up duckling
-```
-
-## Running LangSmith Studio Locally
-
-```bash
-# In project root with dependencies installed
-langgraph dev
-
-# Studio UI will be available at http://localhost:8000
-# Select graph "self_reflection_agent" or "research_agent" to debug
-```
-
----
-
-# Configuration
-
-All configuration is centralized in `config.py` and loaded from environment variables.
-
-## Model Selection Strategy
-
-Priority (highest → lowest) for any given node:
-
-1. `<AGENT>_<NODE>_MODEL` (e.g., `RESEARCH_PLANNER_MODEL`)
-2. `<AGENT>_MODEL` (e.g., `RESEARCH_MODEL`)
-3. `MODEL_NAME` (global fallback)
-
-Example:
-```bash
-# Use specific model for research planner node only
-export RESEARCH_PLANNER_MODEL="gpt-4"
-
-# Use same model for all research agent nodes
-export RESEARCH_MODEL="claude-3-opus"
-
-# Fallback for any unspecified nodes
-export MODEL_NAME="nvidia/nemotron-3-nano-30b-a3b:free"
-```
-
----
-
-# API Reference
-
-## Research Agent
-
-```python
-from agents.research_agent import run_agent
-
-def run_agent(topic: str, query_count: int = 5) -> ResearchState:
-    """
-    Execute research agent on a topic.
-
-    Args:
-        topic: Research question or query (required, non-empty)
-        query_count: Number of search queries to generate and run (default 5)
-
-    Returns:
-        ResearchState with:
-            - synthesis: Final research brief (str)
-            - search_results: List of papers kept after filtering (list[dict])
-            - date_filter: Extracted date constraints (dict)
-            - blocked: Whether agent encountered error (bool)
-            - block_reason: Error message if blocked (str)
-
-    Raises:
-        ValueError: If topic is empty
-    """
-```
-
-## Self-Reflection Agent (v1)
-
-```python
-from agent import run_agent
-
-def run_agent(task: str, max_iterations: int = 3) -> dict:
-    """
-    Execute self-reflection agent on a task.
-
-    Args:
-        task: Task description or prompt (required, non-empty)
-        max_iterations: Max reflection loops (1-10, default 3)
-
-    Returns:
-        dict with:
-            - output: Final generated answer (str)
-            - web_context: Search results used (str)
-            - iterations: Actual iterations used (int)
-    """
-```
-
----
-
-# Troubleshooting
-
-## Research Agent Issues
-
-**"Duckling service not available"**
-```bash
-docker compose up duckling
-# Verify at http://localhost:8000/parse
-```
-
-**"No papers found"**
-- Refine your query (use specific technical terms)
-- Try without date constraints
-- Check arXiv has papers on your topic
-
-**"All results filtered out"**
-- Lower similarity threshold (edit `SIMILARITY_THRESHOLD` in `agents/research_agent.py`, currently 0.1)
-- Use fewer, broader search terms
-- Note: Embedding-based filtering uses local `BAAI/bge-large-en-v1.5` model (no API needed)
-
-## Docker Issues
-
-**Port already in use**
-```bash
-# Find and kill process on port 3000
-lsof -i :3000
-kill -9 <PID>
-
-# Or stop the conflicting local process and retry
-lsof -i :2024
-```
-
-**Image build failures**
-```bash
-# Clean and rebuild
-docker compose down
-docker system prune
-docker compose up --build
-```
-
-## Test Failures
-
-**Import errors**
-```bash
-# Reinstall dependencies
-conda run -n agents pip install -r requirements.txt --force-reinstall
-```
-
-**Network errors in tests**
-- Ensure `OPENROUTER_API_KEY` is set
-- Check internet connection
-- Run `conda run -n agents python -m pytest tests/ -v` with verbose output
-
----
-
-# Contributing
-
-Before contributing:
-
-1. Run tests: `conda run -n agents python -m pytest tests/ -v`
-2. Check code style (follow existing patterns)
-3. Update tests for new functionality
-4. Update this README if adding new agents or features
-
----
-
-# License
-
-See LICENSE file.
+The original Docker Compose setup has been replaced by Kubernetes. If you need to reference the original configuration, see git history prior to the Kubernetes migration commit.
