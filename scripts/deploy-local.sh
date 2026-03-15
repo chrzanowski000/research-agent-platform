@@ -14,7 +14,11 @@ if [[ "$CONTEXT" != "docker-desktop" ]]; then
 fi
 
 echo "==> Building Docker images..."
-"${REPO_ROOT}/scripts/build-images.sh"
+NO_CACHE="${NO_CACHE:-}" "${REPO_ROOT}/scripts/build-images.sh"
+
+echo ""
+echo "==> Injecting secrets from 1Password..."
+"${REPO_ROOT}/scripts/inject-secrets.sh"
 
 echo ""
 echo "==> Applying Kubernetes manifests (dev overlay)..."

@@ -119,7 +119,7 @@ function AgentSelector() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/graphs")
+    fetch("/internal/graphs")
       .then((r) => r.json())
       .then((data) => {
         const graphList = data.graphs ?? [];
