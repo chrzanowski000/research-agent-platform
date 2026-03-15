@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agents/ ./agents/
 COPY config.py .
 COPY langgraph.json .
+COPY database.py .
+COPY models.py .
 
 EXPOSE 2024
 
