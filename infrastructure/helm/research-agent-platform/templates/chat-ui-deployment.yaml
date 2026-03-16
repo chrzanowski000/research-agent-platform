@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-ui
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chat-ui
+spec:
+  replicas: {{ .Values.chatUi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "research-agent-platform.selectorLabels" (dict "component" "chat-ui" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "research-agent-platform.selectorLabels" (dict "component" "chat-ui" "root" .) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+    spec:
+      containers:
+        - name: chat-ui
+          image: "{{ .Values.chatUi.image.repository }}:{{ .Values.chatUi.image.tag }}"
+          imagePullPolicy: {{ .Values.chatUi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: app-config
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.chatUi.resources | nindent 12 }}
