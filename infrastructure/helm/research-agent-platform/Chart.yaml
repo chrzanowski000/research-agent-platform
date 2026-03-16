@@ -1,0 +1,6 @@
+apiVersion: v2
+name: research-agent-platform
+description: Multi-service AI research agent platform (chat-ui, langgraph-api, persistence-api, duckling, postgres)
+type: application
+version: 0.1.0
+appVersion: "latest"
