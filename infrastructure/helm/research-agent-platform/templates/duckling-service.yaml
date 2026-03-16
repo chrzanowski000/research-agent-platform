@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: duckling
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: duckling
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "research-agent-platform.selectorLabels" (dict "component" "duckling" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

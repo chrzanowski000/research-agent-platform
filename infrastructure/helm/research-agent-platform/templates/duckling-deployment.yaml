@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duckling
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: duckling
+spec:
+  replicas: {{ .Values.duckling.replicas }}
+  selector:
+    matchLabels:
+      {{- include "research-agent-platform.selectorLabels" (dict "component" "duckling" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "research-agent-platform.selectorLabels" (dict "component" "duckling" "root" .) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+        - name: duckling
+          image: "{{ .Values.duckling.image.repository }}:{{ .Values.duckling.image.tag }}"
+          imagePullPolicy: {{ .Values.duckling.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.duckling.resources | nindent 12 }}
