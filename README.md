@@ -8,15 +8,35 @@ This project showcases practical engineering patterns for multi-agent systems, i
 
 ## Architecture
 
-```
-Browser → chat-ui (3000)
-             ↓
-     NGINX Ingress (/api/research → persistence-api, /api → langgraph-api)
-             ↓                                    ↓
-  langgraph-api (2024)              persistence-api (8001)
-       ↓         ↓                         ↓
-  duckling    postgres (5432) ←────────────┘
-   (8000)
+```mermaid
+flowchart TD
+    Browser["<b>Browser</b>"]
+    Browser --> chat_ui
+
+    chat_ui["<b>chat-ui</b><br/><sub>port 3000</sub>"]
+    chat_ui --> nginx
+
+    nginx["<b>NGINX Ingress</b><br/><sub>/api/research → persistence-api · /api → langgraph-api</sub>"]
+    nginx -->|/api| langgraph_api
+    nginx -->|/api/research| persistence_api
+
+    langgraph_api["<b>langgraph-api</b><br/><sub>port 2024</sub>"]
+    persistence_api["<b>persistence-api</b><br/><sub>port 8001</sub>"]
+
+    langgraph_api --> duckling
+    langgraph_api --> postgres
+    persistence_api --> postgres
+
+    duckling["<b>duckling</b><br/><sub>port 8000</sub>"]
+    postgres["<b>postgres</b><br/><sub>port 5432</sub>"]
+
+    style Browser fill:#1f2937,color:#f9fafb,stroke:none
+    style chat_ui fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style nginx fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style langgraph_api fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style persistence_api fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style duckling fill:#3b1f5e,color:#e2e8f0,stroke:#a855f7,stroke-width:1.5px
+    style postgres fill:#14532d,color:#e2e8f0,stroke:#22c55e,stroke-width:1.5px
 ```
 
 ### research_agent graph (`agents/research_agent.py`)
