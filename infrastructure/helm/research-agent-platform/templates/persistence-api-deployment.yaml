@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: persistence-api
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: persistence-api
+spec:
+  replicas: {{ .Values.persistenceApi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "research-agent-platform.selectorLabels" (dict "component" "persistence-api" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "research-agent-platform.selectorLabels" (dict "component" "persistence-api" "root" .) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+    spec:
+      containers:
+        - name: persistence-api
+          image: "{{ .Values.persistenceApi.image.repository }}:{{ .Values.persistenceApi.image.tag }}"
+          imagePullPolicy: {{ .Values.persistenceApi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgres:5432/{{ .Values.config.POSTGRES_DB }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.persistenceApi.resources | nindent 12 }}

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: persistence-api
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: persistence-api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "research-agent-platform.selectorLabels" (dict "component" "persistence-api" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
