@@ -2,7 +2,7 @@
 
 [← Home](Home.md) | [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) | [Configuration](Manual-Configuration-and-Secrets.md)
 
-> **Status note:** The Docker Compose setup is described in the README as **legacy/deprecated**. The preferred deployment is Kubernetes (see [Kubernetes Deployment](Manual-Deployment-Kubernetes.md)). The `docker-compose.yml` still works but uses older service names and paths that do not fully match the current `services/` directory layout. Inconsistencies are called out below.
+> **Status note:** The Docker Compose setup is described in the README as **legacy/deprecated**. The preferred deployment is Kubernetes (see [Kubernetes Deployment](Manual-Deployment-Kubernetes.md)). `docker-compose.yml` has been updated to use the current `services/` and `infrastructure/docker/` layout.
 
 ---
 
@@ -85,16 +85,9 @@ docker compose down -v
 
 ---
 
-## Known Inconsistencies
+## Service Name Note
 
-| Issue | Detail |
-|-------|--------|
-| **Old build context** | `docker-compose.yml` builds the `agent` service from `context: .` with `dockerfile: Dockerfile`. There is no top-level `Dockerfile` in the repo — the Dockerfiles are in `infrastructure/docker/`. This means `docker compose up --build` will likely fail unless a root-level `Dockerfile` exists. **Needs confirmation.** |
-| **Old UI build context** | `ui` service uses `context: ./agent-chat-ui`. The frontend was moved to `services/chat-ui/`. This will fail. |
-| **Old persistence API path** | `research-persistence-api` uses `dockerfile: research_persistence_api/Dockerfile`. The service is at `services/persistence-api/`. This will fail. |
-| **Service name mismatch** | Internal hostname is `research-persistence-api` in Docker Compose but `persistence-api` in Kubernetes. |
-
-**Practical recommendation:** The Docker Compose setup will require path fixes before it works with the current repo layout. Use Kubernetes for a working deployment. If Docker Compose is required, update `docker-compose.yml` to point to `infrastructure/docker/` Dockerfiles and `services/` build contexts.
+The internal Docker Compose hostname for the persistence API is `research-persistence-api`, while in Kubernetes it is `persistence-api`. This difference only matters if switching between the two environments — it has no impact on a pure Docker Compose deployment.
 
 ---
 
@@ -129,8 +122,8 @@ See [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) for
 **Fix:** Compose `depends_on` with `condition: service_healthy` should handle this. If it doesn't, check that postgres healthcheck is passing: `docker compose ps postgres`.
 
 ### Build fails — Dockerfile not found
-**Cause:** `docker-compose.yml` references old paths (see inconsistencies above).
-**Fix:** Update `docker-compose.yml` with correct `context` and `dockerfile` paths for current repo layout.
+**Cause:** Stale build context or Dockerfile path.
+**Fix:** Verify `docker-compose.yml` references `services/<name>` as context and `../../infrastructure/docker/<name>.Dockerfile`. These paths reflect the current repo layout.
 
 ---
 
