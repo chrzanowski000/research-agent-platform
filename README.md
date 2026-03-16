@@ -15,6 +15,36 @@ Browser → chat-ui (3000)
    (8000)
 ```
 
+### research_agent graph (`agents/research_agent.py`)
+
+```
+[START]
+   ↓
+parse_dates          ← extracts date constraints via duckling
+   ↓
+extract_research_intent   ← LLM: problem_domains / methods / related_concepts
+   ↓
+generate_semantic_queries  ← combinatorial keyword expansion from intent
+   ↓
+normalize_queries    ← pass-through (normalization disabled, kept for debug)
+   ↓
+apply_date_filter    ← assembles search_plan from expanded_keywords
+   ↓ (conditional)
+   ├─ blocked / no plan → [END]
+   └─ execute_searches   ← runs semantic_scholar (+ web/arxiv/github) queries
+         ↓
+   rank_results_by_similarity  ← embedding cosine filter (threshold=0.1)
+         ↓ (conditional)
+         ├─ no results → [END]
+         └─ synthesize  ← LLM: structured research brief
+               ↓ (PERSIST_RUNS=true)
+           persist_run  ← saves to postgres + disk JSON/MD artifacts
+               ↓
+             [END]
+```
+
+**Commented-out node (disabled):** `validate_date_range` — post-fetch ISO date range filter, sits between `execute_searches` and `rank_results_by_similarity`.
+
 ### Services
 
 | Service | Port | Description |
