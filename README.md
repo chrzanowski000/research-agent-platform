@@ -10,25 +10,25 @@ This project showcases practical engineering patterns for multi-agent systems, i
 
 ```mermaid
 flowchart TD
-    Browser["<b>Browser</b>"]
+    Browser["Browser"]
     Browser --> chat_ui
 
-    chat_ui["<b>chat-ui</b><br/><sub>port 3000</sub>"]
+    chat_ui["chat-ui\nport 3000"]
     chat_ui --> nginx
 
-    nginx["<b>NGINX Ingress</b><br/><sub>/api/research → persistence-api · /api → langgraph-api</sub>"]
+    nginx["NGINX Ingress\n/api → langgraph-api\n/api/research → persistence-api"]
     nginx -->|/api| langgraph_api
     nginx -->|/api/research| persistence_api
 
-    langgraph_api["<b>langgraph-api</b><br/><sub>port 2024</sub>"]
-    persistence_api["<b>persistence-api</b><br/><sub>port 8001</sub>"]
+    langgraph_api["langgraph-api\nport 2024"]
+    persistence_api["persistence-api\nport 8001"]
 
     langgraph_api --> duckling
     langgraph_api --> postgres
     persistence_api --> postgres
 
-    duckling["<b>duckling</b><br/><sub>port 8000</sub>"]
-    postgres["<b>postgres</b><br/><sub>port 5432</sub>"]
+    duckling["duckling\nport 8000"]
+    postgres["postgres\nport 5432"]
 
     style Browser fill:#1f2937,color:#f9fafb,stroke:none
     style chat_ui fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
@@ -45,37 +45,37 @@ flowchart TD
 flowchart TD
     START([START]) --> parse_dates
 
-    parse_dates["<b>parse_dates</b><br/><sub>extracts date constraints via duckling</sub>"]
+    parse_dates["parse_dates\nextracts date constraints via duckling"]
     parse_dates --> extract_research_intent
 
-    extract_research_intent["<b>extract_research_intent</b><br/><sub>LLM · problem_domains / methods / related_concepts</sub>"]
+    extract_research_intent["extract_research_intent\nLLM · problem_domains / methods / related_concepts"]
     extract_research_intent --> generate_semantic_queries
 
-    generate_semantic_queries["<b>generate_semantic_queries</b><br/><sub>combinatorial keyword expansion from intent</sub>"]
+    generate_semantic_queries["generate_semantic_queries\ncombinatoral keyword expansion from intent"]
     generate_semantic_queries --> normalize_queries
 
-    normalize_queries["<b>normalize_queries</b><br/><sub>pass-through · normalization disabled, kept for debug</sub>"]
+    normalize_queries["normalize_queries\npass-through · normalization disabled, kept for debug"]
     normalize_queries --> apply_date_filter
 
-    apply_date_filter["<b>apply_date_filter</b><br/><sub>assembles search_plan from expanded_keywords</sub>"]
+    apply_date_filter["apply_date_filter\nassembles search_plan from expanded_keywords"]
 
     apply_date_filter -->|blocked / no plan| END1([END])
     apply_date_filter -->|search plan ready| execute_searches
 
-    execute_searches["<b>execute_searches</b><br/><sub>runs semantic_scholar · web · arxiv · github queries</sub>"]
+    execute_searches["execute_searches\nruns semantic_scholar · web · arxiv · github queries"]
     execute_searches --> rank_results_by_similarity
 
-    rank_results_by_similarity["<b>rank_results_by_similarity</b><br/><sub>embedding cosine filter · threshold = 0.1</sub>"]
+    rank_results_by_similarity["rank_results_by_similarity\nembedding cosine filter · threshold = 0.1"]
 
     rank_results_by_similarity -->|no results| END2([END])
     rank_results_by_similarity -->|results found| synthesize
 
-    synthesize["<b>synthesize</b><br/><sub>LLM · structured research brief</sub>"]
+    synthesize["synthesize\nLLM · structured research brief"]
 
     synthesize -->|PERSIST_RUNS=false| END3([END])
     synthesize -->|PERSIST_RUNS=true| persist_run
 
-    persist_run["<b>persist_run</b><br/><sub>saves to postgres + disk JSON/MD artifacts</sub>"]
+    persist_run["persist_run\nsaves to postgres + disk JSON/MD artifacts"]
     persist_run --> END4([END])
 
     style START fill:#1f2937,color:#f9fafb,stroke:none
