@@ -19,6 +19,14 @@ spec:
                 name: chat-ui
                 port:
                   number: 3000
+          # /api/research/... → persistence-api (strip /api prefix; $2 = research/... ; must come before /api rule)
+          - path: /api(/|$)(research.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: persistence-api
+                port:
+                  number: 8001
           # /api/... → langgraph-api (strip /api prefix)
           - path: /api(/|$)(.*)
             pathType: ImplementationSpecific
@@ -27,11 +35,3 @@ spec:
                 name: langgraph-api
                 port:
                   number: 2024
-          # /research/... → persistence-api (strip /research prefix)
-          - path: /research(/|$)(.*)
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: persistence-api
-                port:
-                  number: 8001
