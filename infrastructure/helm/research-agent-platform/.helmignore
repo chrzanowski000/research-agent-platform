@@ -1,0 +1,15 @@
+# Patterns to ignore when building packages.
+.DS_Store
+*.tgz
+.git/
+.gitignore
+.gitmodules
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.hg/
+.svn/
+*.pyc
+*.pyo
