@@ -1,6 +1,10 @@
-# agents-self-reflect
+# LangGraph Multi-Agent Research platform
 
-A multi-agent chat platform powered by LangGraph, featuring self-reflection agents and research capabilities.
+research-agent-platform is a full-stack multi-agent AI platform that runs autonomous research workflows using LangGraph-based agents. The system combines a chat interface, agent orchestration backend, research pipeline, and persistence layer to allow users to run complex queries where agents search, analyze, validate, and synthesize information before producing a final answer.
+
+The platform demonstrates production-style AI infrastructure: a Next.js frontend, Python LangGraph agent backend, FastAPI persistence service, and supporting services (Duckling, PostgreSQL) deployed on Kubernetes with Kustomize overlays. It includes automated Docker builds, secret management via 1Password, and deployment workflows for both local Kubernetes (Docker Desktop) and AWS EKS.
+
+This project showcases practical engineering patterns for multi-agent systems, including self-reflection loops, semantic query generation, search result validation, ranking, and synthesis, along with infrastructure required to run agent-based applications in a containerized environment.
 
 ## Architecture
 
@@ -17,33 +21,60 @@ Browser → chat-ui (3000)
 
 ### research_agent graph (`agents/research_agent.py`)
 
-```
-[START]
-   ↓
-parse_dates          ← extracts date constraints via duckling
-   ↓
-extract_research_intent   ← LLM: problem_domains / methods / related_concepts
-   ↓
-generate_semantic_queries  ← combinatorial keyword expansion from intent
-   ↓
-normalize_queries    ← pass-through (normalization disabled, kept for debug)
-   ↓
-apply_date_filter    ← assembles search_plan from expanded_keywords
-   ↓ (conditional)
-   ├─ blocked / no plan → [END]
-   └─ execute_searches   ← runs semantic_scholar (+ web/arxiv/github) queries
-         ↓
-   rank_results_by_similarity  ← embedding cosine filter (threshold=0.1)
-         ↓ (conditional)
-         ├─ no results → [END]
-         └─ synthesize  ← LLM: structured research brief
-               ↓ (PERSIST_RUNS=true)
-           persist_run  ← saves to postgres + disk JSON/MD artifacts
-               ↓
-             [END]
+```mermaid
+flowchart TD
+    START([START]) --> parse_dates
+
+    parse_dates["<b>parse_dates</b><br/><sub>extracts date constraints via duckling</sub>"]
+    parse_dates --> extract_research_intent
+
+    extract_research_intent["<b>extract_research_intent</b><br/><sub>LLM · problem_domains / methods / related_concepts</sub>"]
+    extract_research_intent --> generate_semantic_queries
+
+    generate_semantic_queries["<b>generate_semantic_queries</b><br/><sub>combinatorial keyword expansion from intent</sub>"]
+    generate_semantic_queries --> normalize_queries
+
+    normalize_queries["<b>normalize_queries</b><br/><sub>pass-through · normalization disabled, kept for debug</sub>"]
+    normalize_queries --> apply_date_filter
+
+    apply_date_filter["<b>apply_date_filter</b><br/><sub>assembles search_plan from expanded_keywords</sub>"]
+
+    apply_date_filter -->|blocked / no plan| END1([END])
+    apply_date_filter -->|search plan ready| execute_searches
+
+    execute_searches["<b>execute_searches</b><br/><sub>runs semantic_scholar · web · arxiv · github queries</sub>"]
+    execute_searches --> rank_results_by_similarity
+
+    rank_results_by_similarity["<b>rank_results_by_similarity</b><br/><sub>embedding cosine filter · threshold = 0.1</sub>"]
+
+    rank_results_by_similarity -->|no results| END2([END])
+    rank_results_by_similarity -->|results found| synthesize
+
+    synthesize["<b>synthesize</b><br/><sub>LLM · structured research brief</sub>"]
+
+    synthesize -->|PERSIST_RUNS=false| END3([END])
+    synthesize -->|PERSIST_RUNS=true| persist_run
+
+    persist_run["<b>persist_run</b><br/><sub>saves to postgres + disk JSON/MD artifacts</sub>"]
+    persist_run --> END4([END])
+
+    style START fill:#1f2937,color:#f9fafb,stroke:none
+    style END1 fill:#1f2937,color:#f9fafb,stroke:none
+    style END2 fill:#1f2937,color:#f9fafb,stroke:none
+    style END3 fill:#1f2937,color:#f9fafb,stroke:none
+    style END4 fill:#1f2937,color:#f9fafb,stroke:none
+    style parse_dates fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style extract_research_intent fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style generate_semantic_queries fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style normalize_queries fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style apply_date_filter fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style execute_searches fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style rank_results_by_similarity fill:#1e3a5f,color:#e2e8f0,stroke:#3b82f6,stroke-width:1.5px
+    style synthesize fill:#14532d,color:#e2e8f0,stroke:#22c55e,stroke-width:1.5px
+    style persist_run fill:#3b1f5e,color:#e2e8f0,stroke:#a855f7,stroke-width:1.5px
 ```
 
-**Commented-out node (disabled):** `validate_date_range` — post-fetch ISO date range filter, sits between `execute_searches` and `rank_results_by_similarity`.
+> **Disabled node:** `validate_date_range` — post-fetch ISO date range filter; sits between `execute_searches` and `rank_results_by_similarity` (commented out).
 
 ### Services
 
