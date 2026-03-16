@@ -1,6 +1,7 @@
 # LangGraph Multi-Agent Research platform
 
 research-agent-platform is a full-stack multi-agent AI platform that runs autonomous research workflows using LangGraph-based agents. The system combines a chat interface, agent orchestration backend, research pipeline, and persistence layer to allow users to run complex queries where agents search, analyze, validate, and synthesize information before producing a final answer.
+<<<<<<< HEAD
 
 The platform demonstrates production-style AI infrastructure: a Next.js frontend, Python LangGraph agent backend, FastAPI persistence service, and supporting services (Duckling, PostgreSQL) deployed on Kubernetes with Kustomize overlays. It includes automated Docker builds, secret management via 1Password, and deployment workflows for both local Kubernetes (Docker Desktop) and AWS EKS.
 
@@ -105,7 +106,12 @@ flowchart TD
 | persistence-api | 8001 | FastAPI REST API for browsing research runs |
 | duckling | 8000 | Rasa Duckling date parser |
 | postgres | 5432 | PostgreSQL database |
+=======
+>>>>>>> 6c82c84 (Update README.md)
 
+The platform demonstrates production-style AI infrastructure: a Next.js frontend, Python LangGraph agent backend, FastAPI persistence service, and supporting services (Duckling, PostgreSQL) deployed on Kubernetes with Kustomize overlays. It includes automated Docker builds, secret management via 1Password, and deployment workflows for both local Kubernetes (Docker Desktop) and AWS EKS.
+
+This project showcases practical engineering patterns for multi-agent systems, including self-reflection loops, semantic query generation, search result validation, ranking, and synthesis, along with infrastructure required to run agent-based applications in a containerized environment.
 ---
 
 ## Local Kubernetes Deployment (Docker Desktop)
