@@ -1,0 +1,165 @@
+# =============================================================================
+# research-agent-platform Helm values
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# chat-ui (Next.js frontend)
+# ---------------------------------------------------------------------------
+chatUi:
+  replicas: 1
+  image:
+    repository: agents/chat-ui
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# langgraph-api (Python LangGraph backend)
+# ---------------------------------------------------------------------------
+langgraphApi:
+  replicas: 1
+  image:
+    repository: agents/langgraph-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: false      # Set true for prod to use a PVC instead of emptyDir
+    size: 1Gi
+    storageClass: ""    # Leave empty to use cluster default
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+# ---------------------------------------------------------------------------
+# persistence-api (FastAPI research persistence)
+# ---------------------------------------------------------------------------
+persistenceApi:
+  replicas: 1
+  image:
+    repository: agents/persistence-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# duckling (Rasa date/time parser)
+# ---------------------------------------------------------------------------
+duckling:
+  replicas: 1
+  image:
+    repository: rasa/duckling
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# postgres (PostgreSQL database)
+# ---------------------------------------------------------------------------
+postgres:
+  replicas: 1
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  storageSize: 5Gi
+  storageClass: ""      # Leave empty to use cluster default
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  host: agent.local
+
+# ---------------------------------------------------------------------------
+# Secrets
+# The chart references an EXISTING Kubernetes secret. Never embed secret values here.
+# Run: kubectl get secret app-secrets -n <namespace>  — must exist before helm install.
+# ---------------------------------------------------------------------------
+secrets:
+  existingSecret: app-secrets
+
+# ---------------------------------------------------------------------------
+# App config (maps to the app-config ConfigMap)
+# Empty-string values are omitted from the ConfigMap.
+# ---------------------------------------------------------------------------
+config:
+  # Client-side (baked at Next.js build time)
+  NEXT_PUBLIC_API_URL: /api
+  NEXT_PUBLIC_ASSISTANT_ID: self_reflection_agent
+
+  # Service URLs (internal cluster DNS)
+  LANGGRAPH_API_URL: http://langgraph-api:2024
+  RESEARCH_PERSISTENCE_API_URL: http://persistence-api:8001
+  DUCKLING_URL: http://duckling:8000
+  PERSISTENCE_API_URL: http://persistence-api:8001
+
+  # Database
+  POSTGRES_HOST: postgres
+  POSTGRES_USER: postgres
+  POSTGRES_DB: research
+
+  # Model configuration
+  MODEL_NAME: "nvidia/nemotron-3-nano-30b-a3b:free"
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+
+  # Feature flags
+  PERSIST_RUNS: "true"
+  USE_MOCK_S2: "true"
+  LOG_MODELS: "true"
+  LOG_LEVEL: info
+
+  # LangSmith tracing
+  LANGSMITH_TRACING: "false"
+  LANGSMITH_PROJECT: self-reflection-agent
+
+  # Embedding model
+  RESEARCH_EMBEDDING_MODEL: allenai/specter2
+
+  # Per-agent model overrides (leave empty to use code defaults)
+  # self_reflection_agent (v1)
+  REFLECTION_V1_MODEL: ""
+  REFLECTION_V1_SEARCH_DECISION_MODEL: ""
+  REFLECTION_V1_GENERATE_MODEL: ""
+  REFLECTION_V1_REFLECT_MODEL: ""
+  # self_reflection_agent_v2
+  REFLECTION_V2_MODEL: ""
+  REFLECTION_V2_GENERATE_MODEL: ""
+  REFLECTION_V2_REFLECT_MODEL: ""
+  # research_agent
+  RESEARCH_MODEL: ""
+  RESEARCH_PLANNER_MODEL: ""
+  RESEARCH_FILTER_MODEL: ""
+  RESEARCH_SYNTHESIZER_MODEL: ""
+  RESEARCH_TOPIC_EXTRACTOR_MODEL: ""
+  RESEARCH_KEYWORD_EXPANDER_MODEL: ""
+  RESEARCH_QUERY_GENERATOR_MODEL: ""
