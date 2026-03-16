@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -141,11 +142,25 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/research/runs/{run_id}", status_code=204)
 def delete_run(run_id: int, db: Session = Depends(get_db)):
-    from agents.persistence import delete_run_and_artifacts
-    delete_run_and_artifacts(db, run_id)
+    run = db.query(Run).filter(Run.id == run_id).first()
+    if not run:
+        return
+    query = db.query(Query).filter(Query.id == run.query_id).first()
+    db.delete(run)
+    db.commit()
+    if query:
+        snapshot = os.path.join(query.folder_path, "runs", f"run_{run_id}.json")
+        if os.path.exists(snapshot):
+            os.remove(snapshot)
 
 
 @app.delete("/research/queries/{query_id}", status_code=204)
 def delete_query(query_id: int, db: Session = Depends(get_db)):
-    from agents.persistence import delete_query_and_artifacts
-    delete_query_and_artifacts(db, query_id)
+    query = db.query(Query).filter(Query.id == query_id).first()
+    if not query:
+        return
+    folder_path = query.folder_path
+    db.query(Source).filter(Source.query_id == query_id).delete()
+    db.delete(query)
+    db.commit()
+    shutil.rmtree(folder_path, ignore_errors=True)

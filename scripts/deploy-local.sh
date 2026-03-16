@@ -16,6 +16,8 @@ fi
 echo "==> Building Docker images..."
 "${REPO_ROOT}/scripts/build-images.sh"
 
+
+
 echo ""
 echo "==> Applying Kubernetes manifests (dev overlay)..."
 kubectl apply -k "${REPO_ROOT}/infrastructure/k8s/dev"
@@ -25,7 +27,7 @@ echo "==> Injecting secrets from 1Password..."
 "${REPO_ROOT}/scripts/inject-secrets.sh"
 
 echo ""
-echo "==> Restarting deployments to pick up secrets..."
+echo "==> Restarting deployments to pick up new image + secrets..."
 kubectl rollout restart deployment/langgraph-api
 kubectl rollout restart deployment/persistence-api
 

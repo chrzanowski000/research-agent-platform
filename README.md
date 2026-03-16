@@ -7,7 +7,7 @@ A multi-agent chat platform powered by LangGraph, featuring self-reflection agen
 ```
 Browser → chat-ui (3000)
              ↓
-     NGINX Ingress (/api → langgraph-api, /research → persistence-api)
+     NGINX Ingress (/api/research → persistence-api, /api → langgraph-api)
              ↓                                    ↓
   langgraph-api (2024)              persistence-api (8001)
        ↓         ↓                         ↓
@@ -76,7 +76,7 @@ kubectl create secret generic app-secrets \
 ./scripts/deploy-local.sh
 ```
 
-This builds all Docker images locally and applies the dev Kubernetes overlay.
+This builds all Docker images locally, injects secrets from 1Password, and applies the dev Kubernetes overlay.
 
 ### 4. Access the App
 
