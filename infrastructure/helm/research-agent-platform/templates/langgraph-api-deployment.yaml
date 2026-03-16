@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-api
+  labels:
+    {{- include "research-agent-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: langgraph-api
+spec:
+  replicas: {{ .Values.langgraphApi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "research-agent-platform.selectorLabels" (dict "component" "langgraph-api" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "research-agent-platform.selectorLabels" (dict "component" "langgraph-api" "root" .) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2024"
+    spec:
+      containers:
+        - name: langgraph-api
+          image: "{{ .Values.langgraphApi.image.repository }}:{{ .Values.langgraphApi.image.tag }}"
+          imagePullPolicy: {{ .Values.langgraphApi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 2024
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgres:5432/{{ .Values.config.POSTGRES_DB }}"
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: OPENROUTER_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: TAVILY_API_KEY
+          livenessProbe:
+            httpGet:
+              path: /ok
+              port: 2024
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ok
+              port: 2024
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.langgraphApi.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          {{- if .Values.langgraphApi.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: langgraph-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
