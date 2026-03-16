@@ -65,7 +65,7 @@ flowchart TD
     execute_searches["execute_searches — semantic_scholar · web · arxiv · github"]
     execute_searches --> rank_results_by_similarity
 
-    rank_results_by_similarity["rank_results_by_similarity — cosine filter (threshold=0.1)"]
+    rank_results_by_similarity["rank_results_by_similarity — cosine filter (threshold=0.8)"]
 
     rank_results_by_similarity -->|no results| END2([END])
     rank_results_by_similarity -->|results found| synthesize
