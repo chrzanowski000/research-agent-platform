@@ -1,0 +1,14 @@
+# infrastructure/k8s/base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmaps.yaml
+  - secrets.yaml
+  - services.yaml
+  - chat-ui-deployment.yaml
+  - langgraph-deployment.yaml
+  - persistence-deployment.yaml
+  - duckling-deployment.yaml
+  - postgres-statefulset.yaml
+  - ingress.yaml

@@ -1,0 +1,64 @@
+# infrastructure/k8s/prod/kustomization.yaml
+# NOTE: This file contains ${VAR} placeholders substituted by deploy-eks.sh using envsubst.
+# Do NOT apply this file directly — use scripts/deploy-eks.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+  - langgraph-data-pvc.yaml
+
+# Rewrite image names for ECR
+images:
+  - name: agents/chat-ui
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agents/chat-ui
+    newTag: ${IMAGE_TAG}
+  - name: agents/langgraph-api
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agents/langgraph-api
+    newTag: ${IMAGE_TAG}
+  - name: agents/persistence-api
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agents/persistence-api
+    newTag: ${IMAGE_TAG}
+
+# Scale up stateless services
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: chat-ui
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: langgraph-api
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: persistence-api
+  # Patch langgraph-api to use PVC instead of emptyDir for /app/data.
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: data
+          persistentVolumeClaim:
+            claimName: langgraph-data
+    target:
+      kind: Deployment
+      name: langgraph-api
+  # Patch postgres StorageClass to gp2 for EKS
+  - patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: gp2
+    target:
+      kind: StatefulSet
+      name: postgres

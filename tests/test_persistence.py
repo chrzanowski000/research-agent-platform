@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agents.query_utils import normalize_query, make_slug
-from research_persistence_api.models import Base, Query, Run, Source
+from models import Base, Query, Run, Source
 
 
 # ---------------------------------------------------------------------------
