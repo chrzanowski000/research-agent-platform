@@ -15,8 +15,8 @@ services:
 
   agent:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: services/langgraph-api
+      dockerfile: ../../infrastructure/docker/langgraph-api.Dockerfile
     ports:
       - "2024:2024"
     environment:
@@ -60,8 +60,8 @@ services:
 
   ui:
     build:
-      context: ./agent-chat-ui
-      dockerfile: Dockerfile
+      context: services/chat-ui
+      dockerfile: ../../infrastructure/docker/chat-ui.Dockerfile
     ports:
       - "3000:3000"
     environment:
@@ -80,8 +80,8 @@ services:
 
   research-persistence-api:
     build:
-      context: .
-      dockerfile: research_persistence_api/Dockerfile
+      context: services/persistence-api
+      dockerfile: ../../infrastructure/docker/persistence-api.Dockerfile
     ports:
       - "8001:8001"
     environment:
