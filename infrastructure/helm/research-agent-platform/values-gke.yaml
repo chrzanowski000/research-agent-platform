@@ -1,0 +1,39 @@
+# infrastructure/helm/research-agent-platform/values-gke.yaml
+# GKE + Google Artifact Registry overrides.
+# NOTE: This file contains ${VAR} placeholders substituted by deploy-helm-gke.sh using envsubst.
+# Do NOT use this file directly — use scripts/deploy-helm-gke.sh.
+#
+# Required env vars: GCP_PROJECT, GCP_REGION, IMAGE_TAG
+
+chatUi:
+  replicas: 2
+  image:
+    repository: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/chat-ui
+    tag: ${IMAGE_TAG}
+    pullPolicy: Always
+
+langgraphApi:
+  replicas: 2
+  image:
+    repository: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/langgraph-api
+    tag: ${IMAGE_TAG}
+    pullPolicy: Always
+  persistence:
+    enabled: true
+    storageClass: standard-rwo
+    size: 1Gi
+
+persistenceApi:
+  replicas: 2
+  image:
+    repository: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/persistence-api
+    tag: ${IMAGE_TAG}
+    pullPolicy: Always
+
+postgres:
+  storageClass: standard-rwo
+
+# Set ingress.host to your real domain (e.g. agent.example.com)
+ingress:
+  enabled: true
+  host: agent.example.com
