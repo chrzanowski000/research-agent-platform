@@ -39,12 +39,15 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const envAssistantId = process.env.NEXT_PUBLIC_ASSISTANT_ID ?? "";
   const [apiUrl] = useQueryState("apiUrl", { defaultValue: envApiUrl });
   const [assistantId] = useQueryState("assistantId", { defaultValue: envAssistantId });
+  const resolvedApiUrl = apiUrl?.startsWith("/")
+    ? `${window.location.origin}${apiUrl}`
+    : apiUrl;
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
 
     const threads = await client.threads.search({
       metadata: {
@@ -58,7 +61,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const deleteThread = useCallback(async (threadId: string): Promise<void> => {
     if (!apiUrl) return;
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    const client = createClient(resolvedApiUrl, getApiKey() ?? undefined);
     await client.threads.delete(threadId);
   }, [apiUrl]);
 

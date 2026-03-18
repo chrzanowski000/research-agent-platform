@@ -158,7 +158,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   // Determine final values to use, prioritizing URL params then env vars
-  const finalApiUrl = apiUrl || envApiUrl;
+  // If the URL is relative (e.g. /api), resolve it to an absolute URL using
+  // the current page origin so the LangGraph SDK can construct valid URLs.
+  const rawApiUrl = apiUrl || envApiUrl;
+  const finalApiUrl = rawApiUrl?.startsWith("/")
+    ? `${window.location.origin}${rawApiUrl}`
+    : rawApiUrl;
   const finalAssistantId = assistantId || envAssistantId;
 
   // Show the form if we: don't have an API URL, or don't have an assistant ID
@@ -266,7 +271,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   return (
     <StreamSession
       apiKey={apiKey}
-      apiUrl={apiUrl}
+      apiUrl={finalApiUrl}
       assistantId={assistantId}
     >
       {children}

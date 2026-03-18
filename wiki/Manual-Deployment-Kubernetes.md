@@ -8,6 +8,7 @@ Two deployment paths are supported:
 |------|--------|------|--------|
 | **Local / Dev** | Docker Desktop Kubernetes | Kustomize | `scripts/deploy-local.sh` |
 | **Production** | AWS EKS | Kustomize | `scripts/deploy-eks.sh` |
+| **GKE** | Google Kubernetes Engine | Kustomize or Helm | `scripts/deploy-gke.sh` / `scripts/deploy-helm-gke.sh` |
 | **Helm (alt)** | Any K8s | Helm | Manual |
 
 ---
@@ -104,6 +105,11 @@ kubectl create secret generic app-secrets \
 
 **Important:** `app-secrets` is in-memory only in the dev overlay — it is not written to a YAML file in the repo.
 
+The script respects `K8S_NAMESPACE` (defaults to `default`). For Helm deployments where pods run in the `agents` namespace, set it explicitly:
+```bash
+K8S_NAMESPACE=agents scripts/inject-secrets.sh
+```
+
 ---
 
 ## Kustomize Overlay Structure
@@ -140,6 +146,8 @@ A Helm chart is available at `infrastructure/helm/research-agent-platform/` (cha
 - A running Kubernetes cluster with `kubectl` configured
 - `app-secrets` secret already created (Helm does not manage secrets — inject separately)
 
+> **Note:** These commands use the generic release name `research-agent-platform` and deploy to the `default` namespace. For GKE deployments, the release name is `agents` and the namespace is `agents` — use `scripts/deploy-helm-gke.sh` instead. See [GKE Deployment](Manual-Deployment-GKE.md).
+
 ### Install
 
 ```bash
@@ -169,6 +177,12 @@ helm upgrade research-agent-platform \
 
 ```bash
 helm uninstall research-agent-platform
+```
+
+If the nginx ingress controller was installed separately, also remove it:
+```bash
+helm uninstall ingress-nginx -n ingress-nginx
+kubectl delete namespace ingress-nginx
 ```
 
 ### Key Helm values (`values.yaml`)
@@ -241,11 +255,15 @@ curl http://localhost:8001/health
 ## Troubleshooting
 
 ### `ImagePullBackOff` on local Kubernetes
+
 **Cause:** `imagePullPolicy: Always` trying to pull from a registry, or image not built locally.
+
 **Fix:** Verify you're using the dev overlay (`kubectl apply -k infrastructure/k8s/dev`). Check image name matches what `build-images.sh` builds.
 
 ### `CrashLoopBackOff` on langgraph-api
+
 **Cause:** Usually a missing secret or config error.
+
 **Fix:**
 ```bash
 kubectl logs deployment/langgraph-api
@@ -253,7 +271,9 @@ kubectl logs deployment/langgraph-api
 Check for `ConfigError: Missing required API key`. Verify `app-secrets` exists and has correct keys.
 
 ### `app-secrets` not found
+
 **Cause:** `inject-secrets.sh` not run, or 1Password session expired.
+
 **Fix:**
 ```bash
 op signin  # re-authenticate to 1Password
@@ -261,8 +281,22 @@ scripts/inject-secrets.sh
 kubectl rollout restart deployment/langgraph-api deployment/persistence-api
 ```
 
+### Chat UI calls wrong API URL (CORS errors / "agent.local" on GKE)
+
+**Cause:** `NEXT_PUBLIC_*` variables in Next.js are **baked into the JS bundle at build time** — Kubernetes pod env vars do not affect them at runtime. The local build script (`build-images.sh`) defaults `NEXT_PUBLIC_API_URL=http://agent.local/api`, which is correct for local Docker Desktop (where `/etc/hosts` maps `agent.local` to `127.0.0.1`).
+
+For GKE, the `build-and-push-gke.sh` script defaults to `/api` (a relative URL) instead, so the chat-ui works from any IP or domain without needing `?apiUrl=` in the browser URL.
+
+If you see this error after switching environments, rebuild the GKE image with a new tag using `build-and-push-gke.sh`, then clear any stale `?apiUrl=` from your browser URL bar. See [GKE Deployment](Manual-Deployment-GKE.md) for detailed steps.
+
+**Variant symptom:** `Error: URL constructor: /api/threads is not a valid URL`
+
+This occurs when the image uses `/api` as a relative URL but the LangGraph SDK receives it without resolution to an absolute URL. The fix (shipping in image tag `v1.4` or later) resolves relative URLs using `window.location.origin` in `Stream.tsx` and `Thread.tsx`. Rebuild and redeploy with a current image tag if you see this error.
+
 ### Ingress returns 404
+
 **Cause:** NGINX ingress controller not installed, or `/etc/hosts` not updated.
+
 **Fix:**
 ```bash
 kubectl get ingressclass  # should show nginx
@@ -270,7 +304,9 @@ kubectl get ingressclass  # should show nginx
 ```
 
 ### Postgres StatefulSet stuck in Pending
+
 **Cause:** PVC cannot be provisioned (no default StorageClass on Docker Desktop).
+
 **Fix:**
 ```bash
 kubectl get storageclass  # verify 'hostpath' or 'standard' exists
@@ -281,6 +317,7 @@ kubectl describe pvc postgres-data
 
 ## See Also
 
+- [GKE Deployment](Manual-Deployment-GKE.md) — Google Kubernetes Engine + Artifact Registry, step-by-step
 - [Docker Deployment](Manual-Deployment-Docker.md) — Legacy Docker Compose
 - [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — All env vars and secret handling
 - [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting.md) — Day-2 ops and log viewing

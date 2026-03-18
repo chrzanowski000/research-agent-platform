@@ -1,0 +1,117 @@
+# infrastructure/k8s/gke/kustomization.yaml
+# NOTE: This file contains ${VAR} placeholders substituted by deploy-gke.sh using envsubst.
+# Do NOT apply this file directly — use scripts/deploy-gke.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+  - langgraph-data-pvc.yaml
+
+# Rewrite image names for Google Artifact Registry
+images:
+  - name: agents/chat-ui
+    newName: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/chat-ui
+    newTag: ${IMAGE_TAG}
+  - name: agents/langgraph-api
+    newName: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/langgraph-api
+    newTag: ${IMAGE_TAG}
+  - name: agents/persistence-api
+    newName: ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/agents/persistence-api
+    newTag: ${IMAGE_TAG}
+
+# Scale up stateless services
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: chat-ui
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: langgraph-api
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: persistence-api
+  # Patch langgraph-api to use PVC instead of emptyDir for /app/data
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: data
+          persistentVolumeClaim:
+            claimName: langgraph-data
+    target:
+      kind: Deployment
+      name: langgraph-api
+  # Resource limits — tuned down for GKE cost savings
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+    target:
+      kind: Deployment
+      name: langgraph-api
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+    target:
+      kind: Deployment
+      name: chat-ui
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+    target:
+      kind: Deployment
+      name: persistence-api
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+    target:
+      kind: Deployment
+      name: duckling
+  # Patch postgres StorageClass to standard-rwo for GKE
+  - patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: standard-rwo
+    target:
+      kind: StatefulSet
+      name: postgres
