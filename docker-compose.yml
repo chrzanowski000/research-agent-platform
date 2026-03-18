@@ -65,8 +65,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:2024
-      NEXT_PUBLIC_ASSISTANT_ID: self_reflection_agent
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_PUBLIC_ASSISTANT_ID: research_agent
       LANGGRAPH_API_URL: http://agent:2024
       RESEARCH_PERSISTENCE_API_URL: http://research-persistence-api:8001
     depends_on:
