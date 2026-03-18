@@ -179,6 +179,9 @@ datasets/
 *.arrow
 *.feather
 *.csv.large
+*.jpg
+*.jpeg
+*.png
 
 ##########################################################
 # LLM OUTPUTS / GENERATIONS
