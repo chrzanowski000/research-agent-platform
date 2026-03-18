@@ -73,7 +73,7 @@ This takes ~30 seconds and is only needed once per project. `container.googleapi
 
 ### Step 4 — Create a GKE cluster
 
-> **You can skip this step.** The deploy scripts (`deploy-gke.sh` / `deploy-helm-gke.sh`) automatically create the cluster if it doesn't exist when `GKE_CLUSTER` is set. Use `AUTOPILOT=1` to create an Autopilot cluster, or omit it for Standard. See Part 5 for details.
+> **You can skip this step.** The deploy scripts (`deploy-gke.sh` / `deploy-helm-gke.sh`) automatically create the cluster if it doesn't exist when `GKE_CLUSTER` is set. By default the scripts create a **Standard cluster** (fixed nodes, ~$50–60/month). Set `AUTOPILOT=1` for an Autopilot cluster with zero idle cost. See Part 5 for details.
 
 If you prefer to create the cluster manually, choose one mode:
 
@@ -227,6 +227,8 @@ This creates `app-secrets` in the `agents` namespace. The script fetches cluster
 
 **Automated — Kustomize (1Password CLI):**
 
+> **Important:** The script defaults to the `agents` namespace. Kustomize deploys to `default` — you **must** set `K8S_NAMESPACE=default` or the secret will be created in the wrong namespace.
+
 ```bash
 GKE_CLUSTER=agents-cluster \
 GCP_PROJECT=YOUR_PROJECT_ID \
@@ -265,7 +267,7 @@ kubectl get secret app-secrets -n agents   # Helm
 kubectl get secret app-secrets -n default  # Kustomize
 ```
 
-> **Note:** The 1Password-based approach is the current supported method and is considered temporary. Future alternatives using GCP Secret Manager with External Secrets Operator or Workload Identity Federation will be documented separately once implemented. These approaches avoid storing secrets in local shell sessions entirely.
+> **Note:** For production deployments, consider GCP Secret Manager with External Secrets Operator or Workload Identity Federation as alternatives to 1Password CLI (not yet documented). These approaches avoid storing secrets in local shell sessions entirely.
 
 ---
 
@@ -554,8 +556,8 @@ On Autopilot clusters, LoadBalancer provisioning takes 3–5 minutes. Wait and r
 ```bash
 kubectl get storageclass
 # Should show: standard-rwo (default on GKE)
-kubectl describe pvc langgraph-data
-kubectl describe pvc postgres-data-postgres-0
+kubectl describe pvc langgraph-data            # Kustomize only
+kubectl describe pvc postgres-data-postgres-0  # Helm (agents namespace)
 ```
 
 If the storage class name differs, update `storageClassName` in `infrastructure/k8s/gke/langgraph-data-pvc.yaml` (Kustomize) or `values-gke.yaml` (Helm).

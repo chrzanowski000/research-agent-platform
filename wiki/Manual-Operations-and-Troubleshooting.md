@@ -4,6 +4,10 @@
 
 ---
 
+> **Namespace note:** Commands in this file omit `-n` and target the **`default` namespace** (local Docker Desktop / Kustomize deployments). For **GKE Helm** deployments (namespace `agents`), append `-n agents` to all `kubectl` commands, and use `kubectl rollout restart ... -n agents`, etc.
+
+---
+
 ## Checking Status
 
 ### Pod status
@@ -138,17 +142,26 @@ curl http://localhost:2024/ok
 ## Cleanup
 
 ```bash
-# Remove all platform resources (Kustomize)
+# Remove all platform resources — local Docker Desktop (Kustomize dev overlay):
 kubectl delete -k infrastructure/k8s/dev
 
-# Remove secrets
-kubectl delete secret app-secrets
+# Remove all platform resources — GKE Kustomize:
+kubectl delete -k infrastructure/k8s/gke
 
-# Remove PVC (WARNING: destroys all Postgres data)
-kubectl delete pvc postgres-data
+# Remove all platform resources — Helm (GKE):
+helm uninstall agents -n agents
 
-# Helm uninstall
-helm uninstall research-agent-platform
+# Remove the nginx ingress controller (Helm, installed separately):
+helm uninstall ingress-nginx -n ingress-nginx
+kubectl delete namespace ingress-nginx
+
+# Remove secrets:
+kubectl delete secret app-secrets             # local / Kustomize (default namespace)
+kubectl delete secret app-secrets -n agents   # Helm (agents namespace)
+
+# Remove PVC (WARNING: destroys all Postgres data):
+kubectl delete pvc postgres-data                          # local Docker Desktop (Kustomize)
+kubectl delete pvc postgres-data-postgres-0 -n agents     # GKE Helm
 ```
 
 ---
@@ -171,7 +184,10 @@ kubectl logs deployment/langgraph-api --previous
 
 ### Symptom: `ImagePullBackOff`
 
+**Symptom:** Pod stays in `ImagePullBackOff` or `ErrImagePull` state.
+
 **Cause:** Kubernetes trying to pull image from a registry that doesn't have it.
+
 **Fix:** Ensure you applied the **dev** overlay (not base or prod):
 ```bash
 kubectl apply -k infrastructure/k8s/dev
@@ -214,7 +230,10 @@ Look for SQLAlchemy table creation errors.
 
 ### Symptom: Duckling parse returns empty / date filter not working
 
+**Symptom:** Date filters are ignored, or date ranges come back empty. Logs show `Duckling request failed`.
+
 **Cause:** Duckling pod not running or unreachable.
+
 **Fix:**
 ```bash
 kubectl get pods | grep duckling
@@ -238,7 +257,10 @@ Expected: JSON array with a `time` entity.
 
 ### Symptom: Postgres StatefulSet stuck in `Pending`
 
+**Symptom:** `postgres-0` pod stays in `Pending` state and never starts.
+
 **Cause:** No StorageClass available to provision the PVC.
+
 **Fix:**
 ```bash
 kubectl get storageclass
@@ -250,7 +272,10 @@ Docker Desktop should provide a `hostpath` storageclass by default.
 
 ### Symptom: `app-secrets` not found
 
+**Symptom:** Pods crash with `CreateContainerConfigError` or `secret "app-secrets" not found`.
+
 **Cause:** Secrets were never injected, or were deleted.
+
 **Fix:**
 ```bash
 kubectl get secret app-secrets  # should exist
