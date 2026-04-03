@@ -1,6 +1,6 @@
 # Manual: Deployment — GKE (Google Kubernetes Engine)
 
-[← Home](Home.md) | [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) | [Configuration](Manual-Configuration-and-Secrets.md) | [Operations](Manual-Operations-and-Troubleshooting.md)
+[← Home](Home) | [Kubernetes Deployment](Manual-Deployment-Kubernetes) | [Configuration](Manual-Configuration-and-Secrets) | [Operations](Manual-Operations-and-Troubleshooting)
 
 This guide walks through deploying the platform to Google Kubernetes Engine using Google Artifact Registry for container images. Two deployment paths are supported — choose one:
 
@@ -29,7 +29,7 @@ Install the following tools before starting:
 
 You also need:
 - A **GCP project** with billing enabled
-- Your `.env_tpl` file populated with `op://` secret references (see [Configuration and Secrets](Manual-Configuration-and-Secrets.md))
+- Your `.env_tpl` file populated with `op://` secret references (see [Configuration and Secrets](Manual-Configuration-and-Secrets))
 
 ---
 
@@ -768,6 +768,6 @@ gcloud artifacts repositories delete agents \
 
 ## See Also
 
-- [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) — Local dev, EKS, and generic Helm
-- [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — All env vars and secret management
-- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting.md) — Day-2 ops, logs, restarts
+- [Kubernetes Deployment](Manual-Deployment-Kubernetes) — Local dev, EKS, and generic Helm
+- [Configuration and Secrets](Manual-Configuration-and-Secrets) — All env vars and secret management
+- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting) — Day-2 ops, logs, restarts

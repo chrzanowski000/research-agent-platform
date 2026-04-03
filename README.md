@@ -108,7 +108,7 @@ flowchart TD
     reflect -->|needs improvement| generate
 ```
 
-For node-by-node internals, state schemas, and loop termination logic → [Manual: Agent Graphs](wiki/Manual-Agent-Graphs.md)
+For node-by-node internals, state schemas, and loop termination logic → [Manual: Agent Graphs](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Agent-Graphs)
 
 ---
 
@@ -123,7 +123,7 @@ docker compose up --build
 ./run.sh
 ```
 
-Open http://localhost:3000. → Full setup: [Docker Deployment](wiki/Manual-Deployment-Docker.md)
+Open http://localhost:3000. → Full setup: [Docker Deployment](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-Docker)
 
 ### Kubernetes (Docker Desktop)
 
@@ -138,7 +138,7 @@ Open http://localhost:3000. → Full setup: [Docker Deployment](wiki/Manual-Depl
 kubectl apply -k infrastructure/k8s/dev
 ```
 
-Open http://localhost:3000 (after `kubectl port-forward svc/chat-ui 3000:3000`). → Full setup, Helm, and EKS: [Kubernetes Deployment](wiki/Manual-Deployment-Kubernetes.md)
+Open http://localhost:3000 (after `kubectl port-forward svc/chat-ui 3000:3000`). → Full setup, Helm, and EKS: [Kubernetes Deployment](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-Kubernetes)
 
 ### GKE (Google Kubernetes Engine)
 
@@ -169,7 +169,7 @@ GCP_PROJECT=my-project GCP_REGION=europe-west1 GKE_CLUSTER=my-cluster IMAGE_TAG=
   ./scripts/deploy-gke.sh
 ```
 
-→ Full GKE setup, Artifact Registry, Helm option, and troubleshooting: [GKE Deployment](wiki/Manual-Deployment-GKE.md)
+→ Full GKE setup, Artifact Registry, Helm option, and troubleshooting: [GKE Deployment](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-GKE)
 
 ---
 
@@ -177,7 +177,7 @@ GCP_PROJECT=my-project GCP_REGION=europe-west1 GKE_CLUSTER=my-cluster IMAGE_TAG=
 
 Key variables: `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `POSTGRES_PASSWORD`, `MODEL_NAME` (LLM fallback), `PERSIST_RUNS` (enable DB history), `LANGSMITH_TRACING`.
 
-→ Full reference, per-agent model overrides, and secret management: [Configuration and Secrets](wiki/Manual-Configuration-and-Secrets.md)
+→ Full reference, per-agent model overrides, and secret management: [Configuration and Secrets](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Configuration-and-Secrets)
 
 ---
 
@@ -211,13 +211,13 @@ The wiki covers everything in depth. Start here if you're onboarding or deployin
 
 | Page | Description |
 |------|-------------|
-| [Overview](wiki/Overview.md) | Platform purpose, capabilities, and tech stack |
-| [Applications](wiki/Applications.md) | Per-service documentation (ports, deps, env vars) |
-| [Manual: Architecture](wiki/Manual-Architecture.md) | Request flow, agent pipeline, Mermaid diagrams |
-| [Manual: Agent Graphs](wiki/Manual-Agent-Graphs.md) | LangGraph node-by-node docs for all three agents |
-| [Manual: Deployment — Docker](wiki/Manual-Deployment-Docker.md) | Docker Compose setup and startup |
-| [Manual: Deployment — Kubernetes](wiki/Manual-Deployment-Kubernetes.md) | K8s local, Helm, and EKS deployment |
-| [Manual: Deployment — GKE](wiki/Manual-Deployment-GKE.md) | Google Kubernetes Engine + Artifact Registry |
-| [Manual: Configuration and Secrets](wiki/Manual-Configuration-and-Secrets.md) | All env vars, secret management, 1Password flow |
-| [Manual: Operations and Troubleshooting](wiki/Manual-Operations-and-Troubleshooting.md) | Day-2 ops, logs, restarts, common failures |
-| [Demonstration](wiki/Demonstration.md) | End-to-end demo guide and example prompts |
+| [Overview](https://github.com/chrzanowski000/research-agent-platform/wiki/Overview) | Platform purpose, capabilities, and tech stack |
+| [Applications](https://github.com/chrzanowski000/research-agent-platform/wiki/Applications) | Per-service documentation (ports, deps, env vars) |
+| [Manual: Architecture](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Architecture) | Request flow, agent pipeline, Mermaid diagrams |
+| [Manual: Agent Graphs](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Agent-Graphs) | LangGraph node-by-node docs for all three agents |
+| [Manual: Deployment — Docker](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-Docker) | Docker Compose setup and startup |
+| [Manual: Deployment — Kubernetes](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-Kubernetes) | K8s local, Helm, and EKS deployment |
+| [Manual: Deployment — GKE](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-GKE) | Google Kubernetes Engine + Artifact Registry |
+| [Manual: Configuration and Secrets](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Configuration-and-Secrets) | All env vars, secret management, 1Password flow |
+| [Manual: Operations and Troubleshooting](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Operations-and-Troubleshooting) | Day-2 ops, logs, restarts, common failures |
+| [Demonstration](https://github.com/chrzanowski000/research-agent-platform/wiki/Demonstration) | End-to-end demo guide and example prompts |

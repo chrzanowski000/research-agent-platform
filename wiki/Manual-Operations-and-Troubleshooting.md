@@ -1,6 +1,6 @@
 # Manual: Operations and Troubleshooting
 
-[← Home](Home.md) | [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) | [Configuration](Manual-Configuration-and-Secrets.md)
+[← Home](Home) | [Kubernetes Deployment](Manual-Deployment-Kubernetes) | [Configuration](Manual-Configuration-and-Secrets)
 
 ---
 
@@ -310,6 +310,6 @@ kubectl get events --sort-by=.lastTimestamp
 
 ## See Also
 
-- [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) — Deploy commands
-- [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — Env vars reference
-- [Docker Deployment](Manual-Deployment-Docker.md) — Docker Compose troubleshooting
+- [Kubernetes Deployment](Manual-Deployment-Kubernetes) — Deploy commands
+- [Configuration and Secrets](Manual-Configuration-and-Secrets) — Env vars reference
+- [Docker Deployment](Manual-Deployment-Docker) — Docker Compose troubleshooting

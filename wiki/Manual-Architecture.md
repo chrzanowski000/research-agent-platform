@@ -1,6 +1,6 @@
 # Manual: Architecture
 
-[← Home](Home.md) | [Applications](Applications.md) | [Agent Graphs](Manual-Agent-Graphs.md)
+[← Home](Home) | [Applications](Applications) | [Agent Graphs](Manual-Agent-Graphs)
 
 ---
 
@@ -134,7 +134,7 @@ LangGraph runs agents as directed graphs of Python functions (nodes). Each node 
 
 **Checkpointing:** This deployment uses the in-memory checkpointer (LangGraph CLI open-source mode). Conversation threads are persisted only within a process lifetime — there is no external Redis or database checkpoint store. A process restart clears all active threads.
 
-For the full per-node breakdown of each agent, see [Manual: Agent Graphs](Manual-Agent-Graphs.md).
+For the full per-node breakdown of each agent, see [Manual: Agent Graphs](Manual-Agent-Graphs).
 
 ---
 
@@ -173,6 +173,6 @@ For the full per-node breakdown of each agent, see [Manual: Agent Graphs](Manual
 
 ## See Also
 
-- [Applications](Applications.md) — Per-service details
-- [Manual: Agent Graphs](Manual-Agent-Graphs.md) — LangGraph node-by-node docs
-- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) — All env vars
+- [Applications](Applications) — Per-service details
+- [Manual: Agent Graphs](Manual-Agent-Graphs) — LangGraph node-by-node docs
+- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — All env vars

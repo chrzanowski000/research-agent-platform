@@ -1,6 +1,6 @@
 # Applications
 
-[← Home](Home.md) | [Overview](Overview.md) | [Architecture](Manual-Architecture.md)
+[← Home](Home) | [Overview](Overview) | [Architecture](Manual-Architecture)
 
 This page documents every service in the platform: its purpose, location, stack, ports, and dependencies.
 
@@ -97,7 +97,7 @@ services/langgraph-api/
 
 ### research_agent
 10-node plan-and-execute pipeline. Entry: `parse_dates`. Exit: `synthesize` (or `persist_run` when `PERSIST_RUNS=true`).
-See [Manual: Agent Graphs](Manual-Agent-Graphs.md) for the full node breakdown.
+See [Manual: Agent Graphs](Manual-Agent-Graphs) for the full node breakdown.
 
 ### self_reflection_agent (v1)
 4-node loop with optional Tavily web search. Entry: `search_decision`. Loops until draft is approved or max iterations reached.
@@ -205,6 +205,6 @@ Response: JSON array of time entities
 
 ## See Also
 
-- [Manual: Agent Graphs](Manual-Agent-Graphs.md) — Detailed node-by-node agent documentation
-- [Manual: Architecture](Manual-Architecture.md) — How these services connect
-- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) — All environment variables
+- [Manual: Agent Graphs](Manual-Agent-Graphs) — Detailed node-by-node agent documentation
+- [Manual: Architecture](Manual-Architecture) — How these services connect
+- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — All environment variables

@@ -1,6 +1,6 @@
 # Overview
 
-[← Home](Home.md)
+[← Home](Home)
 
 **agents-self-reflect** is a multi-agent AI research platform. It combines a conversational web UI with LangGraph-powered AI agents that perform multi-step research tasks, then stores results for later review.
 
@@ -71,12 +71,12 @@ persistence-api
   └── → PostgreSQL (:5432)       query/run/source history
 ```
 
-For detailed request flow and Mermaid diagrams, see [Manual: Architecture](Manual-Architecture.md).
+For detailed request flow and Mermaid diagrams, see [Manual: Architecture](Manual-Architecture).
 
 ---
 
 ## See Also
 
-- [Applications](Applications.md) — Per-service details
-- [Manual: Architecture](Manual-Architecture.md) — How data flows end-to-end
-- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) — Model selection and env vars
+- [Applications](Applications) — Per-service details
+- [Manual: Architecture](Manual-Architecture) — How data flows end-to-end
+- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — Model selection and env vars

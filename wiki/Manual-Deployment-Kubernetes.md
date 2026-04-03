@@ -1,6 +1,6 @@
 # Manual: Deployment — Kubernetes
 
-[← Home](Home.md) | [Docker Deployment](Manual-Deployment-Docker.md) | [Configuration](Manual-Configuration-and-Secrets.md) | [Operations](Manual-Operations-and-Troubleshooting.md)
+[← Home](Home) | [Docker Deployment](Manual-Deployment-Docker) | [Configuration](Manual-Configuration-and-Secrets) | [Operations](Manual-Operations-and-Troubleshooting)
 
 Two deployment paths are supported:
 
@@ -146,7 +146,7 @@ A Helm chart is available at `infrastructure/helm/research-agent-platform/` (cha
 - A running Kubernetes cluster with `kubectl` configured
 - `app-secrets` secret already created (Helm does not manage secrets — inject separately)
 
-> **Note:** These commands use the generic release name `research-agent-platform` and deploy to the `default` namespace. For GKE deployments, the release name is `agents` and the namespace is `agents` — use `scripts/deploy-helm-gke.sh` instead. See [GKE Deployment](Manual-Deployment-GKE.md).
+> **Note:** These commands use the generic release name `research-agent-platform` and deploy to the `default` namespace. For GKE deployments, the release name is `agents` and the namespace is `agents` — use `scripts/deploy-helm-gke.sh` instead. See [GKE Deployment](Manual-Deployment-GKE).
 
 ### Install
 
@@ -287,7 +287,7 @@ kubectl rollout restart deployment/langgraph-api deployment/persistence-api
 
 For GKE, the `build-and-push-gke.sh` script defaults to `/api` (a relative URL) instead, so the chat-ui works from any IP or domain without needing `?apiUrl=` in the browser URL.
 
-If you see this error after switching environments, rebuild the GKE image with a new tag using `build-and-push-gke.sh`, then clear any stale `?apiUrl=` from your browser URL bar. See [GKE Deployment](Manual-Deployment-GKE.md) for detailed steps.
+If you see this error after switching environments, rebuild the GKE image with a new tag using `build-and-push-gke.sh`, then clear any stale `?apiUrl=` from your browser URL bar. See [GKE Deployment](Manual-Deployment-GKE) for detailed steps.
 
 **Variant symptom:** `Error: URL constructor: /api/threads is not a valid URL`
 
@@ -317,7 +317,7 @@ kubectl describe pvc postgres-data
 
 ## See Also
 
-- [GKE Deployment](Manual-Deployment-GKE.md) — Google Kubernetes Engine + Artifact Registry, step-by-step
-- [Docker Deployment](Manual-Deployment-Docker.md) — Legacy Docker Compose
-- [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — All env vars and secret handling
-- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting.md) — Day-2 ops and log viewing
+- [GKE Deployment](Manual-Deployment-GKE) — Google Kubernetes Engine + Artifact Registry, step-by-step
+- [Docker Deployment](Manual-Deployment-Docker) — Legacy Docker Compose
+- [Configuration and Secrets](Manual-Configuration-and-Secrets) — All env vars and secret handling
+- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting) — Day-2 ops and log viewing

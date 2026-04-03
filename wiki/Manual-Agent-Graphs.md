@@ -1,6 +1,6 @@
 # Manual: Agent Graphs
 
-[← Home](Home.md) | [Architecture](Manual-Architecture.md) | [Applications](Applications.md)
+[← Home](Home) | [Architecture](Manual-Architecture) | [Applications](Applications)
 
 This page documents the three LangGraph agents in `services/langgraph-api/agents/`. For each agent you will find:
 - An HTML diagram of the graph
@@ -31,66 +31,43 @@ This page documents the three LangGraph agents in `services/langgraph-api/agents
 
 ### Graph Diagram
 
-<div style="font-family: monospace; line-height: 1.6; padding: 12px; border: 1px solid #ccc; display: inline-block;">
-
-<div style="background:#e8f4f8; border: 1px solid #5b9bd5; padding:6px 14px; border-radius:4px; display:inline-block;">START</div>
-<div style="margin-left:60px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">parse_dates</div>
-<div style="margin-left:60px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">extract_research_intent</div>
-<div style="margin-left:60px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">generate_semantic_queries</div>
-<div style="margin-left:60px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">normalize_queries</div>
-<div style="margin-left:60px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">apply_date_filter</div>
-<div style="margin-left:60px;">&#8595; (conditional)</div>
-<table style="border-collapse:collapse; margin-left:10px;">
-  <tr>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">blocked/no plan</td>
-    <td style="padding:4px 30px;"></td>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">ok</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 30px; text-align:center;">&#8594;</td>
-    <td style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; text-align:center;">execute_searches</td>
-  </tr>
-</table>
-<div style="margin-left:160px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block; margin-left:100px;">rank_results_by_similarity</div>
-<div style="margin-left:100px;">&#8595; (conditional)</div>
-<table style="border-collapse:collapse; margin-left:30px;">
-  <tr>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">no results</td>
-    <td style="padding:4px 30px;"></td>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">results found</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 30px; text-align:center;">&#8594;</td>
-    <td style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; text-align:center;">synthesize</td>
-  </tr>
-</table>
-<div style="margin-left:160px;">&#8595;</div>
-<table style="border-collapse:collapse; margin-left:60px;">
-  <tr>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">PERSIST_RUNS=false</td>
-    <td style="padding:4px 30px;"></td>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">PERSIST_RUNS=true</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 30px; text-align:center;">&#8594;</td>
-    <td style="background:#d4edda; border:1px solid #28a745; padding:6px 14px; border-radius:4px; text-align:center;">persist_run &#8594; END</td>
-  </tr>
-</table>
-
-</div>
+```
+START
+  │
+  ▼
+parse_dates
+  │
+  ▼
+extract_research_intent
+  │
+  ▼
+generate_semantic_queries
+  │
+  ▼
+normalize_queries
+  │
+  ▼
+apply_date_filter
+  │
+  ├─[blocked / no plan]──► END
+  │
+  └─[ok]──────────────────► execute_searches
+                                  │
+                                  ▼
+                        rank_results_by_similarity
+                                  │
+                                  ├─[no results]──► END
+                                  │
+                                  └─[results found]──► synthesize
+                                                           │
+                                                           ├─[PERSIST_RUNS=false]──► END
+                                                           │
+                                                           └─[PERSIST_RUNS=true]───► persist_run ──► END
+```
 
 ---
 
-### Mermaid Fallback
+### research_agent — Mermaid Diagram
 
 ```mermaid
 flowchart TD
@@ -242,53 +219,29 @@ Writes the final structured research brief using an LLM.
 
 ### Graph Diagram
 
-<div style="font-family: monospace; line-height: 1.6; padding: 12px; border: 1px solid #ccc; display: inline-block;">
-
-<div style="background:#e8f4f8; border:1px solid #5b9bd5; padding:6px 14px; border-radius:4px; display:inline-block;">START</div>
-<div style="margin-left:55px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">search_decision</div>
-<div style="margin-left:55px;">&#8595; (conditional)</div>
-<table style="border-collapse:collapse;">
-  <tr>
-    <td style="padding:4px; text-align:center; color:#999; font-size:0.85em;">blocked</td>
-    <td style="padding:4px 20px; text-align:center; color:#999; font-size:0.85em;">search_needed=true</td>
-    <td style="padding:4px; text-align:center; color:#999; font-size:0.85em;">search_needed=false</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 20px; text-align:center;">&#8594;</td>
-    <td style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; text-align:center;">web_search</td>
-    <td style="padding:4px 20px; text-align:center;">&#8594;</td>
-    <td style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; text-align:center;">generate</td>
-  </tr>
-</table>
-<div style="margin-left:230px;">&#8595;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8595;</div>
-<div style="margin-left:200px; display:flex; gap:20px;">
-  <span>&#8594; generate</span>
-</div>
-<br/>
-<div style="margin-left:230px; background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">generate</div>
-<div style="margin-left:230px;">&#8595;</div>
-<div style="margin-left:215px; background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">reflect</div>
-<div style="margin-left:215px;">&#8595; (conditional)</div>
-<table style="border-collapse:collapse; margin-left:80px;">
-  <tr>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">done or blocked</td>
-    <td style="padding:4px 30px;"></td>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">needs improvement</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 30px; text-align:center;">&#8592; loop back</td>
-    <td style="background:#e8f4f8; border:1px solid #5b9bd5; padding:6px 14px; border-radius:4px; text-align:center;">search_decision</td>
-  </tr>
-</table>
-
-</div>
+```
+START
+  │
+  ▼
+search_decision
+  │
+  ├─[blocked]────────────────────────────────► END
+  │
+  ├─[search_needed=true]──► web_search ──┐
+  │                                      │
+  └─[search_needed=false]────────────────┴──► generate
+                                                  │
+                                                  ▼
+                                               reflect
+                                                  │
+                                                  ├─[done or blocked]──► END
+                                                  │
+                                                  └─[needs improvement]──► search_decision (loop)
+```
 
 ---
 
-### Mermaid Fallback
+### self_reflection_agent v1 — Mermaid Diagram
 
 ```mermaid
 flowchart TD
@@ -383,32 +336,23 @@ Evaluates the draft and either approves it or provides feedback.
 
 ### Graph Diagram
 
-<div style="font-family: monospace; line-height: 1.6; padding: 12px; border: 1px solid #ccc; display: inline-block;">
-
-<div style="background:#e8f4f8; border:1px solid #5b9bd5; padding:6px 14px; border-radius:4px; display:inline-block;">START</div>
-<div style="margin-left:40px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">generate</div>
-<div style="margin-left:40px;">&#8595;</div>
-<div style="background:#fff3cd; border:1px solid #ffc107; padding:6px 14px; border-radius:4px; display:inline-block;">reflect</div>
-<div style="margin-left:40px;">&#8595; (conditional)</div>
-<table style="border-collapse:collapse; margin-left:0px;">
-  <tr>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">done or blocked</td>
-    <td style="padding:4px 30px;"></td>
-    <td style="padding:4px 16px; text-align:center; color:#999; font-size:0.85em;">needs improvement</td>
-  </tr>
-  <tr>
-    <td style="background:#f8d7da; border:1px solid #f5c6cb; padding:6px 14px; border-radius:4px; text-align:center;">END</td>
-    <td style="padding:4px 20px; text-align:center;">&#8592; loop back</td>
-    <td style="background:#e8f4f8; border:1px solid #5b9bd5; padding:6px 14px; border-radius:4px; text-align:center;">generate</td>
-  </tr>
-</table>
-
-</div>
+```
+START
+  │
+  ▼
+generate
+  │
+  ▼
+reflect
+  │
+  ├─[done or blocked]──► END
+  │
+  └─[needs improvement]──► generate (loop)
+```
 
 ---
 
-### Mermaid Fallback
+### self_reflection_agent v2 — Mermaid Diagram
 
 ```mermaid
 flowchart TD
@@ -525,6 +469,6 @@ The deployment uses the **in-memory LangGraph checkpointer** (LangGraph CLI open
 
 ## See Also
 
-- [Architecture](Manual-Architecture.md) — System-level request flow
-- [Applications](Applications.md) — Service overview with ports and dependencies
-- [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — Per-node model configuration
+- [Architecture](Manual-Architecture) — System-level request flow
+- [Applications](Applications) — Service overview with ports and dependencies
+- [Configuration and Secrets](Manual-Configuration-and-Secrets) — Per-node model configuration

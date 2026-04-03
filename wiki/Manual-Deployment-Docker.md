@@ -1,8 +1,8 @@
 # Manual: Deployment — Docker
 
-[← Home](Home.md) | [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) | [Configuration](Manual-Configuration-and-Secrets.md)
+[← Home](Home) | [Kubernetes Deployment](Manual-Deployment-Kubernetes) | [Configuration](Manual-Configuration-and-Secrets)
 
-> **Status note:** The Docker Compose setup is described in the README as **legacy/deprecated**. The preferred deployment is Kubernetes (see [Kubernetes Deployment](Manual-Deployment-Kubernetes.md)). `docker-compose.yml` has been updated to use the current `services/` and `infrastructure/docker/` layout.
+> **Status note:** The Docker Compose setup is described in the README as **legacy/deprecated**. The preferred deployment is Kubernetes (see [Kubernetes Deployment](Manual-Deployment-Kubernetes)). `docker-compose.yml` has been updated to use the current `services/` and `infrastructure/docker/` layout.
 
 ---
 
@@ -93,7 +93,7 @@ The internal Docker Compose hostname for the persistence API is `research-persis
 
 ## Environment Variables Reference
 
-See [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) for the full variable list. Key vars for Docker Compose:
+See [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) for the full variable list. Key vars for Docker Compose:
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
@@ -129,6 +129,6 @@ See [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) for
 
 ## See Also
 
-- [Kubernetes Deployment](Manual-Deployment-Kubernetes.md) — Recommended deployment
-- [Configuration and Secrets](Manual-Configuration-and-Secrets.md) — Full env var reference
-- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting.md) — Container management
+- [Kubernetes Deployment](Manual-Deployment-Kubernetes) — Recommended deployment
+- [Configuration and Secrets](Manual-Configuration-and-Secrets) — Full env var reference
+- [Operations and Troubleshooting](Manual-Operations-and-Troubleshooting) — Container management

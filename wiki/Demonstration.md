@@ -1,6 +1,6 @@
 # Demonstration
 
-[← Home](Home.md) | [Overview](Overview.md) | [Agent Graphs](Manual-Agent-Graphs.md)
+[← Home](Home) | [Overview](Overview) | [Agent Graphs](Manual-Agent-Graphs)
 
 This page walks through a complete end-to-end demonstration of the platform.
 
@@ -10,8 +10,8 @@ This page walks through a complete end-to-end demonstration of the platform.
 
 The platform must be running. Choose one:
 
-- **Docker Compose (quickest):** see [Docker Deployment](Manual-Deployment-Docker.md)
-- **Kubernetes (recommended):** see [Kubernetes Deployment](Manual-Deployment-Kubernetes.md)
+- **Docker Compose (quickest):** see [Docker Deployment](Manual-Deployment-Docker)
+- **Kubernetes (recommended):** see [Kubernetes Deployment](Manual-Deployment-Kubernetes)
 
 Once running, open **http://localhost:3000** (or **http://agent.local** with Ingress).
 
@@ -180,6 +180,6 @@ List the most important considerations when designing a REST API
 
 ## See Also
 
-- [Manual: Agent Graphs](Manual-Agent-Graphs.md) — How each agent works internally
-- [Manual: Architecture](Manual-Architecture.md) — Full request flow
-- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets.md) — Enable persistence and tracing
+- [Manual: Agent Graphs](Manual-Agent-Graphs) — How each agent works internally
+- [Manual: Architecture](Manual-Architecture) — Full request flow
+- [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — Enable persistence and tracing
