@@ -1,4 +1,4 @@
-# Applications
+# Services
 
 [← Home](Home) | [Overview](Overview) | [Architecture](Manual-Architecture)
 

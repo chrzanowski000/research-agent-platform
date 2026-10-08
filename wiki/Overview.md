@@ -77,6 +77,6 @@ For detailed request flow and Mermaid diagrams, see [Manual: Architecture](Manua
 
 ## See Also
 
-- [Applications](Applications) — Per-service details
+- [Services](Services) — Per-service details
 - [Manual: Architecture](Manual-Architecture) — How data flows end-to-end
 - [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — Model selection and env vars

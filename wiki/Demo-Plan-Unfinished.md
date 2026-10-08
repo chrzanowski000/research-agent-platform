@@ -1,8 +1,10 @@
-# Demonstration
+# Demo Plan Unfinished
 
 [← Home](Home) | [Overview](Overview) | [Agent Graphs](Manual-Agent-Graphs)
 
-This page walks through a complete end-to-end demonstration of the platform.
+This page is only a draft demo plan. It is not finished and is kept here for development purposes.
+
+Use it as working documentation while shaping the eventual demo flow, not as final user-facing documentation.
 
 ---
 
