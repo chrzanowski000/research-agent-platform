@@ -100,7 +100,7 @@ See [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) for th
 | `OPENROUTER_API_KEY` | Yes | — | LLM gateway key |
 | `TAVILY_API_KEY` | Yes | — | Web search key |
 | `POSTGRES_PASSWORD` | Yes | — | DB password |
-| `MODEL_NAME` | No | `openai/gpt-6-sol` | Global LLM fallback |
+| `MODEL_NAME` | No | `openai/gpt-6-luna` | Global LLM fallback |
 | `PERSIST_RUNS` | No | `false` | Enable DB persistence |
 | `LANGSMITH_TRACING` | No | `false` | Enable tracing |
 | `DUCKLING_URL` | No | `http://duckling:8000` | Auto-set in Docker Compose |

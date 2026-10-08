@@ -43,7 +43,7 @@ class Config:
     request_timeout: int = 30
 
     # ── Global default ──────────────────────────────────────────────────────
-    model_name: str = "openai/gpt-6-sol"
+    model_name: str = "openai/gpt-6-luna"
 
     # ── duckling (date parsing) ─────────────────────────────────────────────
     duckling_url: str = "http://localhost:8000"
@@ -92,7 +92,7 @@ class Config:
             os.environ.setdefault("LANGSMITH_API_KEY", langsmith_key)
             os.environ.setdefault("LANGSMITH_PROJECT", langsmith_project)
 
-        global_model = os.getenv("MODEL_NAME", "openai/gpt-6-sol")
+        global_model = os.getenv("MODEL_NAME", "openai/gpt-6-luna")
 
         return cls(
             openrouter_api_key=api_key,

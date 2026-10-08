@@ -84,7 +84,7 @@ The agent backend uses a 3-tier model resolution hierarchy:
 **Global fallback:**
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_NAME` | `openai/gpt-6-sol` | Fallback for all nodes not individually configured |
+| `MODEL_NAME` | `openai/gpt-6-luna` | Fallback for all nodes not individually configured |
 
 **research_agent:**
 | Variable | Node | Description |

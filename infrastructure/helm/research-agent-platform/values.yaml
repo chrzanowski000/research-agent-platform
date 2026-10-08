@@ -129,7 +129,7 @@ config:
   POSTGRES_DB: research
 
   # Model configuration
-  MODEL_NAME: "openai/gpt-6-sol"
+  MODEL_NAME: "openai/gpt-6-luna"
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
 
   # Feature flags
