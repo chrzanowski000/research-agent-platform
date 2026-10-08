@@ -1,6 +1,6 @@
 # Manual: Agent Graphs
 
-[← Home](Home) | [Architecture](Manual-Architecture) | [Applications](Applications)
+[← Home](Home) | [Architecture](Manual-Architecture) | [Services](Services)
 
 This page documents the three LangGraph agents in `services/langgraph-api/agents/`. For each agent you will find:
 - An HTML diagram of the graph
@@ -470,5 +470,5 @@ The deployment uses the **in-memory LangGraph checkpointer** (LangGraph CLI open
 ## See Also
 
 - [Architecture](Manual-Architecture) — System-level request flow
-- [Applications](Applications) — Service overview with ports and dependencies
+- [Services](Services) — Service overview with ports and dependencies
 - [Configuration and Secrets](Manual-Configuration-and-Secrets) — Per-node model configuration

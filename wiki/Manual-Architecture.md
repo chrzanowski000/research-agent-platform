@@ -1,6 +1,6 @@
 # Manual: Architecture
 
-[← Home](Home) | [Applications](Applications) | [Agent Graphs](Manual-Agent-Graphs)
+[← Home](Home) | [Services](Services) | [Agent Graphs](Manual-Agent-Graphs)
 
 ---
 
@@ -173,6 +173,6 @@ For the full per-node breakdown of each agent, see [Manual: Agent Graphs](Manual
 
 ## See Also
 
-- [Applications](Applications) — Per-service details
+- [Services](Services) — Per-service details
 - [Manual: Agent Graphs](Manual-Agent-Graphs) — LangGraph node-by-node docs
 - [Manual: Configuration and Secrets](Manual-Configuration-and-Secrets) — All env vars
