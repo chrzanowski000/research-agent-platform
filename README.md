@@ -212,7 +212,7 @@ The wiki covers everything in depth. Start here if you're onboarding or deployin
 | Page | Description |
 |------|-------------|
 | [Overview](https://github.com/chrzanowski000/research-agent-platform/wiki/Overview) | Platform purpose, capabilities, and tech stack |
-| [Applications](https://github.com/chrzanowski000/research-agent-platform/wiki/Applications) | Per-service documentation (ports, deps, env vars) |
+| [Services](https://github.com/chrzanowski000/research-agent-platform/wiki/Services) | Per-service documentation (ports, deps, env vars) |
 | [Manual: Architecture](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Architecture) | Request flow, agent pipeline, Mermaid diagrams |
 | [Manual: Agent Graphs](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Agent-Graphs) | LangGraph node-by-node docs for all three agents |
 | [Manual: Deployment — Docker](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-Docker) | Docker Compose setup and startup |
@@ -220,4 +220,4 @@ The wiki covers everything in depth. Start here if you're onboarding or deployin
 | [Manual: Deployment — GKE](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Deployment-GKE) | Google Kubernetes Engine + Artifact Registry |
 | [Manual: Configuration and Secrets](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Configuration-and-Secrets) | All env vars, secret management, 1Password flow |
 | [Manual: Operations and Troubleshooting](https://github.com/chrzanowski000/research-agent-platform/wiki/Manual-Operations-and-Troubleshooting) | Day-2 ops, logs, restarts, common failures |
-| [Demonstration](https://github.com/chrzanowski000/research-agent-platform/wiki/Demonstration) | End-to-end demo guide and example prompts |
+| [Demo Plan Unfinished](https://github.com/chrzanowski000/research-agent-platform/wiki/Demo-Plan-Unfinished) | Draft demo plan and example prompts |
