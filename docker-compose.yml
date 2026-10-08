@@ -22,7 +22,7 @@ services:
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      MODEL_NAME: ${MODEL_NAME:-nvidia/nemotron-3-nano-30b-a3b:free}
+      MODEL_NAME: ${MODEL_NAME:-openai/gpt-6-sol}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-self-reflection-agent}

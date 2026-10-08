@@ -43,7 +43,7 @@ class Config:
     request_timeout: int = 30
 
     # ── Global default ──────────────────────────────────────────────────────
-    model_name: str = "nvidia/nemotron-3-nano-30b-a3b:free"
+    model_name: str = "openai/gpt-6-sol"
 
     # ── duckling (date parsing) ─────────────────────────────────────────────
     duckling_url: str = "http://localhost:8000"
@@ -92,7 +92,7 @@ class Config:
             os.environ.setdefault("LANGSMITH_API_KEY", langsmith_key)
             os.environ.setdefault("LANGSMITH_PROJECT", langsmith_project)
 
-        global_model = os.getenv("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b:free")
+        global_model = os.getenv("MODEL_NAME", "openai/gpt-6-sol")
 
         return cls(
             openrouter_api_key=api_key,

@@ -214,7 +214,7 @@ Open http://localhost:3000.
 | `LANGSMITH_API_KEY` | — | No | LangSmith key for tracing |
 | `LANGSMITH_TRACING` | `true` | No | Enable/disable LangSmith tracing |
 | `LANGSMITH_PROJECT` | `self-reflection-agent` | No | LangSmith project name |
-| `MODEL_NAME` | `nvidia/nemotron-3-nano-30b-a3b:free` | No | Global default model (OpenRouter model string) |
+| `MODEL_NAME` | `openai/gpt-6-sol` | No | Global default model (OpenRouter model string) |
 | `PERSIST_RUNS` | `false` | No | Set to `true` to save research runs to PostgreSQL |
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/research` | If `PERSIST_RUNS=true` | PostgreSQL connection string |
 | `POSTGRES_PASSWORD` | — | Docker only | PostgreSQL superuser password |
