@@ -96,7 +96,7 @@ The agent backend uses a 3-tier model resolution hierarchy:
 | `RESEARCH_QUERY_GENERATOR_MODEL` | query generation | Falls back to `RESEARCH_PLANNER_MODEL` |
 | `RESEARCH_FILTER_MODEL` | `rank_results_by_similarity` | Similarity ranking |
 | `RESEARCH_SYNTHESIZER_MODEL` | `synthesize` | Final synthesis |
-| `RESEARCH_EMBEDDING_MODEL` | `rank_results_by_similarity` | Local sentence-transformers model. Default: `BAAI/bge-large-en-v1.5`. `.env_tpl` sets `allenai/specter2` |
+| `RESEARCH_EMBEDDING_MODEL` | `rank_results_by_similarity` | Local sentence-transformers model. Default: `BAAI/bge-large-en-v1.5`. Must be a full sentence-transformers model (adapter-only repos like `allenai/specter2` fail to load) |
 
 **self_reflection_agent (v1):**
 | Variable | Node | Description |
