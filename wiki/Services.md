@@ -75,7 +75,7 @@ services/chat-ui/src/
 - LangGraph CLI (`langgraph dev`) — open-source, in-memory checkpoint mode
 - OpenRouter as LLM gateway (OpenAI-compatible)
 - `sentence-transformers` for local embeddings
-- `sqlalchemy` + `psycopg2` for database access
+- `sqlalchemy` + `psycopg` (v3) for database access
 - Tavily Python SDK for web search
 
 **Default port:** 2024
@@ -124,7 +124,7 @@ Features: PII middleware masking, configurable max iterations, search budget.
 - Python 3.12
 - FastAPI
 - SQLAlchemy 2.x (ORM)
-- psycopg2-binary (PostgreSQL driver)
+- psycopg[binary] v3 (PostgreSQL driver)
 - Uvicorn (ASGI server)
 
 **Default port:** 8001

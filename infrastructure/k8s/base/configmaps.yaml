@@ -22,7 +22,7 @@ data:
   POSTGRES_USER: "postgres"
 
   # Model config defaults
-  MODEL_NAME: "nvidia/nemotron-3-nano-30b-a3b:free"
+  MODEL_NAME: "openai/gpt-6-luna"
   OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1"
   PERSIST_RUNS: "true"
   USE_MOCK_S2: "true"

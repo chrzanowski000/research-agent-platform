@@ -14,7 +14,7 @@ This page centralizes all configuration knowledge for the platform. Variables ar
 
 Secrets in `.env_tpl` use 1Password references:
 ```
-OPENROUTER_API_KEY=op://APIS/OPENROUTER_API_KEY_SELF_REFLECT/credential
+OPENROUTER_API_KEY=op://APIS/OpenRouter_research_agent/credential
 ```
 
 **Kubernetes:** `scripts/inject-secrets.sh` resolves these references and creates a K8s secret named `app-secrets`:
@@ -84,7 +84,7 @@ The agent backend uses a 3-tier model resolution hierarchy:
 **Global fallback:**
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_NAME` | `nvidia/nemotron-3-nano-30b-a3b:free` | Fallback for all nodes not individually configured |
+| `MODEL_NAME` | `openai/gpt-6-luna` | Fallback for all nodes not individually configured |
 
 **research_agent:**
 | Variable | Node | Description |
